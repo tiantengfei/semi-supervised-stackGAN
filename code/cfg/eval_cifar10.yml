@@ -1,0 +1,31 @@
+CONFIG_NAME: 'cifar10_sup'
+
+DATASET_NAME: 'cifar10'
+DATA_DIR: '../data/cifar10'
+GPU_ID: '-1'
+WORKERS: 1 # 4
+
+TREE:
+    BRANCH_NUM: 2
+    BASE_SIZE: 32
+
+
+
+TEST:
+    B_EXAMPLE: False
+
+
+TRAIN:
+    FLAG: False
+    NET_D: 'model/'
+    BATCH_SIZE: 10
+
+
+GAN:
+    DF_DIM: 32
+    GF_DIM: 32
+    Z_DIM: 100
+    R_NUM: 2
+    B_CONDITION: True
+    CLASS_NUM: 10
+    HASH_DIM: 12

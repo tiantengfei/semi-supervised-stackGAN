@@ -1,0 +1,40 @@
+CONFIG_NAME: 'cifar10_sup'
+
+DATASET_NAME: 'cifar10'
+DATA_DIR: '../data/cifar10'
+GPU_ID: '-1'
+WORKERS: 2 # 4
+
+
+TREE:
+    BRANCH_NUM: 2
+    BASE_SIZE: 32
+
+
+TRAIN:
+    FLAG: True
+    NET_G: ''  # '../output/cat_3stages_color/Model/netG_epoch_1.pth'
+    NET_D: '' #'model/'  #
+    BATCH_SIZE: 2
+    MAX_EPOCH: 800
+    SNAPSHOT_INTERVAL: 100
+    DISCRIMINATOR_LR: 0.0002
+    GENERATOR_LR: 0.0002
+    COEFF:
+      COLOR_LOSS: 50.0  # 1.0
+
+GAN:
+    DF_DIM: 32
+    GF_DIM: 32
+    Z_DIM: 100
+    R_NUM: 2
+    B_CONDITION: True
+    CLASS_NUM: 10
+    HASH_DIM: 12
+
+
+
+
+
+
+
