@@ -81,8 +81,12 @@ if __name__ == "__main__":
 
 
     if cfg.DATA_DIR.find('cifar10') != -1:
-        label_dataset = Cifar10Folder(cfg.DATA_DIR, "cifar10_label", transform=image_transform)
-        unlabel_dataset = Cifar10Folder(cfg.DATA_DIR, "cifar10_unlabel", transform=image_transform)
+        label_dataset = Cifar10Folder(cfg.DATA_DIR, "cifar10_label",
+                                      base_size=cfg.TRAIN.BATCH_SIZE,
+                                      transform=image_transform)
+        unlabel_dataset = Cifar10Folder(cfg.DATA_DIR, "cifar10_unlabel",
+                                        base_size=cfg.TRAIN.BATCH_SIZE,
+                                        transform=image_transform)
 
     elif cfg.DATA_DIR.find('imagenet') != -1:
        pass
@@ -105,10 +109,10 @@ if __name__ == "__main__":
     if cfg.TRAIN.FLAG:
         algo.train()
     else:
-        db_dataset = Cifar10Folder(cfg.DATA_DIR, "image_db",
+        db_dataset = Cifar10Folder(cfg.DATA_DIR, "cifar10_unlabel",
                                    base_size=cfg.TREE.BASE_SIZE,
                                    transform=image_transform)
-        test_dataset = Cifar10Folder(cfg.DATA_DIR, "image_test",
+        test_dataset = Cifar10Folder(cfg.DATA_DIR, "cifar10_test",
                                      base_size=cfg.TREE.BASE_SIZE,
                                      transform=image_transform)
 

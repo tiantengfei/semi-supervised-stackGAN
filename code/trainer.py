@@ -22,7 +22,9 @@ from torch.autograd import Variable
 from miscc.config import cfg
 from miscc.utils import mkdir_p
 from model import G_NET, D_NET64, D_NET128, D_NET256, D_NET512, D_NET1024
-
+from sklearn.metrics import average_precision_score
+from scipy.spatial.distance import cdist
+from sklearn.metrics import precision_recall_curve
 
 # ################## Shared functions ###################
 def compute_mean_covariance(img):
@@ -1100,15 +1102,15 @@ class condGANTrainer(object):
 
     def get_hash(self, dataloader, netsD, dataset_name):
         hash_dict = {}
-        img_dict = {}
+        imgs_total = None
         label_total = None
-        output_dir = "eval"
+        output_dir = os.path.join("eval", dataset_name)
         if not os.path.exists(output_dir):
             os.mkdir(output_dir)
 
         for step, data in enumerate(dataloader, 0):
             imgs_tcpu, real_imgs, \
-            labels, label_vectors, _ = self.prepare_data(data)
+            labels, label_vectors = self.prepare_data(data)
 
             for i in range(cfg.TREE.BRANCH_NUM):
                 net = netsD[i]
@@ -1120,45 +1122,27 @@ class condGANTrainer(object):
                 else:
                     hash_dict[i] = hash_logits
 
-                if i in img_dict:
-                    img_dict[i] = torch.cat((img_dict[i], real_img), 0)
-                else:
-                    img_dict[i] = real_img
-
             if label_total is None:
                 label_total = labels
+                imgs_total = real_imgs[0]
             else:
                 label_total = torch.cat((label_total, labels), 0)
-
-            if (step + 1) % 100 == 0:
-                print(hash_dict[0].size())
-                print(label_total.size())
-                for i in range(cfg.TREE.BRANCH_NUM):
-                    output_hash = os.path.join(output_dir, "branch_%d_%d_hash_%s.npy" % (i, step, dataset_name))
-                    np.save(output_hash, hash_dict[i].data.numpy())
-                    if i == 0:
-                        output_img = os.path.join(output_dir, "branch_%d_%d_imgs_%s.npy" % (i, step, dataset_name))
-                        np.save(output_img, img_dict[i].data.numpy())
-
-                output_label = os.path.join(output_dir, "branch_%d_label_%s.npy" % (step, dataset_name))
-                np.save(output_label, label_total.data.numpy())
-                print("step_%d: save done !" % (step))
-                hash_dict = {}
-                img_dict = {}
-                label_total = None
+                imgs_total = torch.cat((imgs_total, real_imgs[0]), 0)
 
             print("step %d done!" % step)
+        print(hash_dict[0].size())
+        print(label_total.size())
+
+        output_img = os.path.join(output_dir, dataset_name+"_images.npy")
+        np.save(output_img, imgs_total.data.numpy())
+
+        output_label = os.path.join(output_dir, dataset_name + "_label.npy")
+        np.save(output_label, label_total.data.numpy())
 
         if label_total is not None:
             for i in range(cfg.TREE.BRANCH_NUM):
-                output_hash = os.path.join(output_dir, "branch_%d_last_hash_%s.npy" % (i, dataset_name))
+                output_hash = os.path.join(output_dir, "branch_%d_hash_%s.npy" % (i, dataset_name))
                 np.save(output_hash, hash_dict[i].data.numpy())
-                if i == 0:
-                    output_img = os.path.join(output_dir, "branch_%d_last_mgs_%s.npy" % (i, dataset_name))
-                    np.save(output_img, img_dict[i].data.numpy())
-
-            output_label = os.path.join(output_dir, "branch_last_label_%s.npy" % dataset_name)
-            np.save(output_label, label_total.data.numpy())
 
             # print("total images is %d" % (step * cfg.TRAIN.BATCH_SIZE))
             # return hash_dict, img_dict, label_total
@@ -1209,73 +1193,118 @@ class condGANTrainer(object):
                 arr = a
         return arr
 
-    def compute_MAP(self, root, paths, branch):
-        query_label_path, query_hash_paths = paths[0], paths[1:]
+    def compute_MAP_sklearn(self, test_features, db_features, test_label, db_label, metric='euclidean'):
 
-        query_labels = self.get_numpy(root, query_label_path)
-        query_hashs = []
-        for i in query_hash_paths:
-            query_hash = self.get_numpy(root, i)
-            query_hashs.append(query_hash)
+        Y = cdist(test_features, db_features, metric)
+        ind = np.argsort(Y, axis=1)
+        prec_total = 0.0
+        recall_total = None
+        precision_total = None
+        for k in range(np.shape(test_features)[0]):
+            class_values = db_label[ind[k,:]]
+            y_true = (test_label[k] == class_values)
+            y_scores = np.arange(y_true.shape[0],0,-1)
+            ap = average_precision_score(y_true, y_scores)
+            prec_total += ap
 
-        print("total test number:%d" % query_hash.shape[0])
-        assert query_hash.shape[0] == query_hash.shape[0], "query hash size not equal to query label size"
+            if recall_total is None:
+                precision_total, recall_total, _ = precision_recall_curve(y_true, y_scores)
+            else:
+                precision, recall, _ = precision_recall_curve(y_true, y_scores)
+                precision_total = precision_total + precision
+                recall_total = recall_total + recall
 
-        query_labels = query_labels.tolist()
-        recall_num = 100
+        test_num = test_features.shape[0]
+        MAP = prec_total / test_num
+        recall_total = [i/test_num for i in recall_total]
+        precision_total = [i / test_num for i in precision_total]
 
-        MAP = 0
-        cnt = 0
-        precision_topk = [0 for i in range(len(query_labels) / 10 + 1)]
-        recall_curve = [0 for i in range(len(query_labels) / 25 + 1)]
-        precision_curve = [0 for i in range(len(query_labels) / 25 + 1)]
+        print("MAP: %f" % MAP)
+        print("recall:{0}".format(recall_total[:30]))
+        print("precision:{0}".format(precision_total[:30]))
 
-        for i in range(query_labels.shape[0]):
-            hamming_dis = 0.0
-            for h in query_hashs:
-                q = h[i]
-                hamming_dis += np.sum((h - q) ** 2, axis=1)
-            hamming_dis = hamming_dis.tolist()
-            hamming_label = zip(query_labels, hamming_dis)
-            sorted_by_hamming = sorted(hamming_label, key=lambda m: m[1])
+        with open(metric + "_result.txt", 'w') as f:
+            f.write("MAP:%f\n" % MAP)
+            f.write("recall\n:{0}".format(recall_total))
+            f.write("precision\n:{0}".format(precision_total))
 
-            smi = 0.0
-            count = 0
-            ap = 0
-            for label, hamming in sorted_by_hamming:
-                count += 1
-                if label == query_labels[i]:
-                    smi += 1
-                    ap += smi / count
-                if count % 10 == 0:
-                    precision_topk[count / 10] += smi / count
+        np.save("recall.npy", recall_total)
+        np.save("precision.npy", precision_total)
 
-                if count % 25 == 0:
-                    recall_curve[count / 25] += smi / recall_num
-                    precision_curve[count / 25] += smi / count
-            #print("ap:%f"%(ap / smi))
-            MAP += ap / smi
-            cnt += 1
-            if cnt % 100 == 0:
-                print("has process %d queries" % cnt)
+    def compute_MAP(self, root, branch, query_labels, db_labels):
 
-        MAP = MAP / len(query_labels)
-        precision_topk = [i / len(query_labels) for i in precision_topk]
-        recall_curve = [i / len(query_labels) for i in recall_curve]
-        precision_curve = [i / len(query_labels) for i in precision_curve]
+        query_hash_path = os.path.join(root, "test", "branch_%d_hash_%s.npy" % (branch, "test"))
+        db_hash_path = os.path.join(root, "db", "branch_%d_hash_%s.npy" % (branch, "db"))
 
-        print("MAP_BRANCH_%d: %f" % (branch, MAP))
-        print("precision_top:{0}".format(precision_topk[0]))
-        print("recall curve:{0}".format(recall_curve[0]))
-        print("precision curve:{0}".format(precision_curve[0]))
+        query_hashs = np.load(query_hash_path)
+        db_hashs = np.load(db_hash_path)
 
-        f = open("branch_%d_eval" % branch, 'w')
-        f.write("MAP: %f\n" % (MAP))
-        f.write("precision_top:\n")
-        self.write(f, precision_topk, "precision_top")
-        self.write(f, recall_curve, "recall_curve")
-        self.write(f, precision_curve, "precision_curve")
-        f.close()
+        assert db_labels.shape[0] == db_hashs.shape[0], "db labels num must be equal to db hash num"
+        assert query_labels.shape[0] == query_hashs.shape[0], "db labels num must be equal to db hash num"
+
+        print("-----------------------------------use features----------------------")
+        self.compute_MAP_sklearn(query_hashs, db_hashs, query_labels, db_labels)
+        print("-----------------------------------use hash--------------------------")
+        query_h = query_hashs > 0.5
+        db_h= db_hashs > 0.5
+        self.compute_MAP_sklearn(query_hashs, db_hashs, query_labels, db_labels)
+
+        return db_hashs, query_hashs
+
+       # query_labels = query_labels.tolist()
+        # recall_num = 5900
+        # MAP = 0
+        # cnt = 0
+        # precision_topk = [0 for i in range(len(query_labels) / 10 + 1)]
+        # recall_curve = [0 for i in range(len(query_labels) / 25 + 1)]
+        # precision_curve = [0 for i in range(len(query_labels) / 25 + 1)]
+
+        # for i in range(query_labels.shape[0]):
+        #     hamming_dis = 0.0
+        #     for h in query_hashs:
+        #         q = h[i]
+        #         hamming_dis += np.sum((h - q) ** 2, axis=1)
+        #     hamming_dis = hamming_dis.tolist()
+        #     hamming_label = zip(query_labels, hamming_dis)
+        #     sorted_by_hamming = sorted(hamming_label, key=lambda m: m[1])
+        #
+        #     smi = 0.0
+        #     count = 0
+        #     ap = 0
+        #     for label, hamming in sorted_by_hamming:
+        #         count += 1
+        #         if label == query_labels[i]:
+        #             smi += 1
+        #             ap += smi / count
+        #         if count % 10 == 0:
+        #             precision_topk[count / 10] += smi / count
+        #
+        #         if count % 25 == 0:
+        #             recall_curve[count / 25] += smi / recall_num
+        #             precision_curve[count / 25] += smi / count
+        #     #print("ap:%f"%(ap / smi))
+        #     MAP += ap / smi
+        #     cnt += 1
+        #     if cnt % 100 == 0:
+        #         print("has process %d queries" % cnt)
+        #
+        # MAP = MAP / len(query_labels)
+        # precision_topk = [i / len(query_labels) for i in precision_topk]
+        # recall_curve = [i / len(query_labels) for i in recall_curve]
+        # precision_curve = [i / len(query_labels) for i in precision_curve]
+        #
+        # print("MAP_BRANCH_%d: %f" % (branch, MAP))
+        # print("precision_top:{0}".format(precision_topk[0]))
+        # print("recall curve:{0}".format(recall_curve[0]))
+        # print("precision curve:{0}".format(precision_curve[0]))
+        #
+        # f = open("branch_%d_eval" % branch, 'w')
+        # f.write("MAP: %f\n" % (MAP))
+        # f.write("precision_top:\n")
+        # self.write(f, precision_topk, "precision_top")
+        # self.write(f, recall_curve, "recall_curve")
+        # self.write(f, precision_curve, "precision_curve")
+        # f.close()
 
     def compute_MAP_hash(self, root, paths, branch):
         query_label_path, query_hash_path = paths
@@ -1346,33 +1375,40 @@ class condGANTrainer(object):
 
     def evaluate_MAP(self, db_dataloader, query_dataloader, root):
 
-        if len(os.listdir(root)) == 0:
+        if len(os.listdir(os.path.join(root, "test"))) == 0:
             netsD = self.load_Dnet(self.gpus)
             self.get_hash(query_dataloader, netsD, "test")
             print("get query image hash")
-            #self.get_hash(db_dataloader, netsD, "db")
-            #print("get db image hash!")
+            self.get_hash(db_dataloader, netsD, "db")
+            print("get db image hash!")
 
         eval_path = root
-        files = os.listdir(eval_path)
-        print(files)
-        query_label_path_0 = [s for s in files if 'test' in s and 'label' in s]
-        label_hash_path = [query_label_path_0]
+        db_hashs = None
+        query_hashs = None
+        query_label_path = os.path.join(root, "test", "test_label.npy")
+        db_label_path = os.path.join(root, "db", "db_label.npy")
+        query_labels = np.load(query_label_path)
+        db_labels = np.load(db_label_path)
 
         for i in range(cfg.TREE.BRANCH_NUM):
             print("--------------------------branch %d-------------------------------------------" % i)
-            query_hash_path = [s for s in files if 'test' in s and 'hash' in s and "_" + str(i) + "_" in s]
-            self.compute_MAP(eval_path, (query_label_path_0, query_hash_path), i)
-            self.compute_MAP_hash(eval_path, (query_label_path_0, query_hash_path), i)
-            label_hash_path.append(query_hash_path)
+            db_hash, query_hash = self.compute_MAP(eval_path, i, query_labels, db_labels)
+
+            if db_hashs is None:
+                db_hashs = db_hash
+                query_hashs = query_hash
+            else:
+                db_hashs += db_hash
+                query_hashs += query_hash
+
+        db_hashs /= cfg.TREE.BRANCH_NUM
+        query_hashs /= cfg.TREE.BRANCH_NUM
 
         print("--------------------------------total--------------------------------------------")
-        self.compute_MAP(eval_path, label_hash_path, 0)
+        print("-----------------------------------use features----------------------")
+        self.compute_MAP_sklearn(query_hashs, db_hashs, query_labels, db_labels)
+        print("-----------------------------------use hash--------------------------")
 
-    def write(self, f, ls, name):
-        f.write("%s\n" % (name))
-
-        for i in ls:
-            f.write("%f\t" % i)
-
-        f.write("\n")
+        db_hashs = db_hashs > 0.5
+        query_hashs = query_hashs > 0.5
+        self.compute_MAP_sklearn(query_hashs, db_hashs, query_labels, db_labels, metric="hamming")

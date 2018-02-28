@@ -362,7 +362,7 @@ class D_NET64(nn.Module):
         #     nn.Sigmoid())
 
         self.uncond_logits = nn.Sequential(
-            nn.Linear(ndf * ndf, cfg.GAN.CLASS_NUM + 1),
+            nn.Linear(ndf * ndf, cfg.GAN.CLASS_NUM),
         )
 
         self.softmax = nn.Softmax()
@@ -428,7 +428,7 @@ class D_NET128(nn.Module):
 
         # self.jointConv = Block3x3_leakRelu(ndf * 8 + efg, ndf * 8)
         self.uncond_logits = nn.Sequential(
-            nn.Linear(ndf * ndf, self.class_num + 1),
+            nn.Linear(ndf * ndf, self.class_num),
         )
         self.softmax = nn.Softmax()
         self.hash = nn.Sequential(
@@ -496,7 +496,7 @@ class D_NET256(nn.Module):
 
         # self.jointConv = Block3x3_leakRelu(ndf * 8 + efg, ndf * 8)
         self.uncond_logits = nn.Sequential(
-            nn.Linear(ndf * ndf, self.class_num + 1),
+            nn.Linear(ndf * ndf, self.class_num),
         )
 
         self.softmax = nn.Softmax()
