@@ -103,7 +103,7 @@ if __name__ == "__main__":
 
 
     from trainer import condGANTrainer as trainer
-    algo = trainer(output_dir, label_loader, unlabel_loader, imsize)
+    algo = trainer(output_dir, label_loader, unlabel_loader)
 
     start_t = time.time()
     if cfg.TRAIN.FLAG:

@@ -527,7 +527,7 @@ class GANTrainer(object):
 
 # ################# Text to image task############################ #
 class condGANTrainer(object):
-    def __init__(self, output_dir, label_loader, unlabel_loader, imsize):
+    def __init__(self, output_dir, label_loader, unlabel_loader):
         if cfg.TRAIN.FLAG:
             self.model_dir = os.path.join(output_dir, 'Model')
             self.image_dir = os.path.join(output_dir, 'Image')
@@ -848,10 +848,10 @@ class condGANTrainer(object):
 
         self.criterion = nn.CrossEntropyLoss()
 
-        self.real_labels = \
-            Variable(torch.FloatTensor(self.batch_size).fill_(1))
-        self.fake_labels = \
-            Variable(torch.FloatTensor(self.batch_size).fill_(0))
+        # self.real_labels = \
+        #     Variable(torch.FloatTensor(self.batch_size).fill_(1))
+        # self.fake_labels = \
+        #     Variable(torch.FloatTensor(self.batch_size).fill_(0))
 
         self.gradient_one = torch.FloatTensor([1.0])
         self.gradient_half = torch.FloatTensor([0.5])
@@ -864,9 +864,8 @@ class condGANTrainer(object):
 
         if cfg.CUDA:
             self.criterion.cuda()
-            self.criterion_1.cuda()
-            self.real_labels = self.real_labels.cuda()
-            self.fake_labels = self.fake_labels.cuda()
+            # self.real_labels = self.real_labels.cuda()
+            # self.fake_labels = self.fake_labels.cuda()
             self.gradient_one = self.gradient_one.cuda()
             self.gradient_half = self.gradient_half.cuda()
             noise, fixed_noise = noise.cuda(), fixed_noise.cuda()
