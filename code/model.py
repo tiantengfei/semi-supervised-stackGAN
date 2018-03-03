@@ -372,6 +372,7 @@ class D_NET64(nn.Module):
             nn.Sigmoid())
 
     def forward(self, x_var, c_code=None):
+        #print("----------------------64--------")
         x_code = self.img_code_s16(x_var)
         # print(x_code.size())
 
@@ -395,9 +396,10 @@ class D_NET64(nn.Module):
 
         # print("64:x_code:{0}".format(x_code.size()))
         x_code = x_code.view(-1, self.df_dim * self.df_dim)
-        # print("64:x_code_1:{0}".format(x_code.size()))
+        #print("64:x_code_1:{0}".format(x_code.size()))
 
         out_uncond = self.uncond_logits(x_code)
+        #print("out_uncond:{0}".format(out_uncond.size()))
         softmax_out = self.softmax(out_uncond)
         hash_logit = self.hash(x_code)
         # print("64:hash_logits:{0}".format(hash_logit.size()))

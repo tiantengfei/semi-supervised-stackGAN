@@ -5,7 +5,8 @@ import sys
 import time
 from copy import deepcopy
 from random import randint
-
+from numbers import Number
+import math
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
@@ -110,7 +111,7 @@ def load_network(gpus):
     netG = G_NET()
     netG.apply(weights_init)
     netG = torch.nn.DataParallel(netG, device_ids=gpus)
-    print(netG)
+    #print(netG)
 
     netsD = []
 
@@ -130,13 +131,13 @@ def load_network(gpus):
         netsD[i].apply(weights_init)
         netsD[i] = torch.nn.DataParallel(netsD[i], device_ids=gpus)
         # print(netsD[i])
-    print('# of netsD', len(netsD))
+    #print('# of netsD', len(netsD))
 
     count = 0
     if cfg.TRAIN.NET_G != '':
         state_dict = torch.load(cfg.TRAIN.NET_G)
         netG.load_state_dict(state_dict)
-        print('Load ', cfg.TRAIN.NET_G)
+        #print('Load ', cfg.TRAIN.NET_G)
 
         istart = cfg.TRAIN.NET_G.rfind('_') + 1
         iend = cfg.TRAIN.NET_G.rfind('.')
@@ -230,301 +231,6 @@ def save_img_results(imgs_tcpu, fake_imgs, num_imgs,
         summary_writer.flush()
 
 
-# ################## For uncondional tasks ######################### #
-class GANTrainer(object):
-    def __init__(self, output_dir, data_loader, imsize):
-        if cfg.TRAIN.FLAG:
-            self.model_dir = os.path.join(output_dir, 'Model')
-            self.image_dir = os.path.join(output_dir, 'Image')
-            self.log_dir = os.path.join(output_dir, 'Log')
-            mkdir_p(self.model_dir)
-            mkdir_p(self.image_dir)
-            mkdir_p(self.log_dir)
-            self.summary_writer = FileWriter(self.log_dir)
-
-        s_gpus = cfg.GPU_ID.split(',')
-        self.gpus = [int(ix) for ix in s_gpus]
-        self.num_gpus = len(self.gpus)
-        torch.cuda.set_device(self.gpus[0])
-        cudnn.benchmark = True
-
-        self.batch_size = cfg.TRAIN.BATCH_SIZE * self.num_gpus
-        self.max_epoch = cfg.TRAIN.MAX_EPOCH
-        self.snapshot_interval = cfg.TRAIN.SNAPSHOT_INTERVAL
-
-        self.data_loader = data_loader
-        self.num_batches = len(self.data_loader)
-
-    def prepare_data(self, data):
-        imgs = data
-
-        vimgs = []
-        for i in range(self.num_Ds):
-            if cfg.CUDA:
-                vimgs.append(Variable(imgs[i]).cuda())
-            else:
-                vimgs.append(Variable(imgs[i]))
-
-        return imgs, vimgs
-
-    def train_Dnet(self, idx, count):
-        flag = count % 100
-        batch_size = self.real_imgs[0].size(0)
-        criterion = self.criterion
-
-        netD, optD = self.netsD[idx], self.optimizersD[idx]
-        real_imgs = self.real_imgs[idx]
-        fake_imgs = self.fake_imgs[idx]
-        real_labels = self.real_labels[:batch_size]
-        fake_labels = self.fake_labels[:batch_size]
-        #
-        netD.zero_grad()
-        #
-        real_logits = netD(real_imgs)
-        fake_logits = netD(fake_imgs.detach())
-        #
-        errD_real = criterion(real_logits[0], real_labels)
-        errD_fake = criterion(fake_logits[0], fake_labels)
-        #
-        errD = errD_real + errD_fake
-        errD.backward()
-        # update parameters
-        optD.step()
-        # log
-        if flag == 0:
-            summary_D = summary.scalar('D_loss%d' % idx, errD.data[0])
-            self.summary_writer.add_summary(summary_D, count)
-        return errD
-
-    def train_Gnet(self, count):
-        self.netG.zero_grad()
-        errG_total = 0
-        flag = count % 100
-        batch_size = self.real_imgs[0].size(0)
-        criterion = self.criterion
-        real_labels = self.real_labels[:batch_size]
-
-        for i in range(self.num_Ds):
-            netD = self.netsD[i]
-            outputs = netD(self.fake_imgs[i])
-            errG = criterion(outputs[0], real_labels)
-            # errG = self.stage_coeff[i] * errG
-            errG_total = errG_total + errG
-            if flag == 0:
-                summary_G = summary.scalar('G_loss%d' % i, errG.data[0])
-                self.summary_writer.add_summary(summary_G, count)
-
-        # Compute color preserve losses
-        if cfg.TRAIN.COEFF.COLOR_LOSS > 0:
-            if self.num_Ds > 1:
-                mu1, covariance1 = compute_mean_covariance(self.fake_imgs[-1])
-                mu2, covariance2 = \
-                    compute_mean_covariance(self.fake_imgs[-2].detach())
-                like_mu2 = cfg.TRAIN.COEFF.COLOR_LOSS * nn.MSELoss()(mu1, mu2)
-                like_cov2 = cfg.TRAIN.COEFF.COLOR_LOSS * 5 * \
-                            nn.MSELoss()(covariance1, covariance2)
-                errG_total = errG_total + like_mu2 + like_cov2
-            if self.num_Ds > 2:
-                mu1, covariance1 = compute_mean_covariance(self.fake_imgs[-2])
-                mu2, covariance2 = \
-                    compute_mean_covariance(self.fake_imgs[-3].detach())
-                like_mu1 = cfg.TRAIN.COEFF.COLOR_LOSS * nn.MSELoss()(mu1, mu2)
-                like_cov1 = cfg.TRAIN.COEFF.COLOR_LOSS * 5 * \
-                            nn.MSELoss()(covariance1, covariance2)
-                errG_total = errG_total + like_mu1 + like_cov1
-
-            if flag == 0:
-                sum_mu = summary.scalar('G_like_mu2', like_mu2.data[0])
-                self.summary_writer.add_summary(sum_mu, count)
-                sum_cov = summary.scalar('G_like_cov2', like_cov2.data[0])
-                self.summary_writer.add_summary(sum_cov, count)
-                if self.num_Ds > 2:
-                    sum_mu = summary.scalar('G_like_mu1', like_mu1.data[0])
-                    self.summary_writer.add_summary(sum_mu, count)
-                    sum_cov = summary.scalar('G_like_cov1', like_cov1.data[0])
-                    self.summary_writer.add_summary(sum_cov, count)
-
-        errG_total.backward()
-        self.optimizerG.step()
-        return errG_total
-
-    def train(self):
-        self.netG, self.netsD, self.num_Ds, \
-        self.inception_model, start_count = load_network(self.gpus)
-        avg_param_G = copy_G_params(self.netG)
-
-        self.optimizerG, self.optimizersD = \
-            define_optimizers(self.netG, self.netsD)
-
-        self.criterion = nn.BCELoss()
-
-        self.real_labels = \
-            Variable(torch.FloatTensor(self.batch_size).fill_(1))
-        self.fake_labels = \
-            Variable(torch.FloatTensor(self.batch_size).fill_(0))
-        nz = cfg.GAN.Z_DIM
-        noise = Variable(torch.FloatTensor(self.batch_size, nz))
-        fixed_noise = \
-            Variable(torch.FloatTensor(self.batch_size, nz).normal_(0, 1))
-
-        if cfg.CUDA:
-            self.criterion.cuda()
-            noise, fixed_noise = noise.cuda(), fixed_noise.cuda()
-            self.real_labels = self.real_labels.cuda()
-            self.fake_labels = self.fake_labels.cuda()
-
-        predictions = []
-        count = start_count
-        start_epoch = start_count // (self.num_batches)
-        for epoch in range(start_epoch, self.max_epoch):
-            start_t = time.time()
-
-            for step, data in enumerate(self.data_loader, 0):
-                #######################################################
-                # (0) Prepare training data
-                ######################################################
-                self.imgs_tcpu, self.real_imgs, self.labels, self.label_vectos \
-                    = self.prepare_data(data)
-
-                #######################################################
-                # (1) Generate fake images
-                ######################################################
-                noise.data.normal_(0, 1)
-                self.fake_imgs, _, _ = self.netG(noise)
-
-                #######################################################
-                # (2) Update D network
-                ######################################################
-                errD_total = 0
-                for i in range(self.num_Ds):  # num_DS: D network numbers
-                    errD = self.train_Dnet(i, count)
-                    errD_total += errD
-
-                #######################################################
-                # (3) Update G network: maximize log(D(G(z)))
-                ######################################################
-                errG_total = self.train_Gnet(count)
-                for p, avg_p in zip(self.netG.parameters(), avg_param_G):
-                    avg_p.mul_(0.999).add_(0.001, p.data)
-
-                # for inception score
-                pred = self.inception_model(self.fake_imgs[-1].detach())
-                predictions.append(pred.data.cpu().numpy())
-
-                if count % 100 == 0:
-                    summary_D = summary.scalar('D_loss', errD_total.data[0])
-                    summary_G = summary.scalar('G_loss', errG_total.data[0])
-                    self.summary_writer.add_summary(summary_D, count)
-                    self.summary_writer.add_summary(summary_G, count)
-                if step == 0:
-                    print('''[%d/%d][%d/%d] Loss_D: %.2f Loss_G: %.2f'''
-                          % (epoch, self.max_epoch, step, self.num_batches,
-                             errD_total.data[0], errG_total.data[0]))
-                count = count + 1
-
-                if count % cfg.TRAIN.SNAPSHOT_INTERVAL == 0:
-                    save_model(self.netG, avg_param_G, self.netsD, count, self.model_dir)
-                    save_model(self.netG, avg_param_G, self.netsD, count, self.model_dir)
-                    # Save images
-                    backup_para = copy_G_params(self.netG)
-                    load_params(self.netG, avg_param_G)
-                    #
-                    self.fake_imgs, _, _ = self.netG(fixed_noise)
-                    save_img_results(self.imgs_tcpu, self.fake_imgs, self.num_Ds,
-                                     count, self.image_dir, self.summary_writer)
-                    #
-                    load_params(self.netG, backup_para)
-
-                    # Compute inception score
-                    if len(predictions) > 500:
-                        predictions = np.concatenate(predictions, 0)
-                        mean, std = compute_inception_score(predictions, 10)
-                        # print('mean:', mean, 'std', std)
-                        m_incep = summary.scalar('Inception_mean', mean)
-                        self.summary_writer.add_summary(m_incep, count)
-                        #
-                        mean_nlpp, std_nlpp = \
-                            negative_log_posterior_probability(predictions, 10)
-                        m_nlpp = summary.scalar('NLPP_mean', mean_nlpp)
-                        self.summary_writer.add_summary(m_nlpp, count)
-                        #
-                        predictions = []
-
-            end_t = time.time()
-            print('Total Time: %.2fsec' % (end_t - start_t))
-
-        save_model(self.netG, avg_param_G, self.netsD, count, self.model_dir)
-        save_model(self.netG, avg_param_G, self.netsD, count, self.model_dir)
-
-        self.summary_writer.close()
-
-    def save_superimages(self, images, folder, startID, imsize):
-        fullpath = '%s/%d_%d.png' % (folder, startID, imsize)
-        vutils.save_image(images.data, fullpath, normalize=True)
-
-    def save_singleimages(self, images, folder, startID, imsize):
-        for i in range(images.size(0)):
-            fullpath = '%s/%d_%d.png' % (folder, startID + i, imsize)
-            # range from [-1, 1] to [0, 1]
-            img = (images[i] + 1.0) / 2
-            img = images[i].add(1).div(2).mul(255).clamp(0, 255).byte()
-            # range from [0, 1] to [0, 255]
-            ndarr = img.permute(1, 2, 0).data.cpu().numpy()
-            im = Image.fromarray(ndarr)
-            im.save(fullpath)
-
-    def evaluate(self, split_dir):
-        if cfg.TRAIN.NET_G == '':
-            print('Error: the path for morels is not found!')
-        else:
-            # Build and load the generator
-            netG = G_NET()
-            netG.apply(weights_init)
-            netG = torch.nn.DataParallel(netG, device_ids=self.gpus)
-            print(netG)
-            # state_dict = torch.load(cfg.TRAIN.NET_G)
-            state_dict = \
-                torch.load(cfg.TRAIN.NET_G,
-                           map_location=lambda storage, loc: storage)
-            netG.load_state_dict(state_dict)
-            print('Load ', cfg.TRAIN.NET_G)
-
-            # the path to save generated images
-            s_tmp = cfg.TRAIN.NET_G
-            istart = s_tmp.rfind('_') + 1
-            iend = s_tmp.rfind('.')
-            iteration = int(s_tmp[istart:iend])
-            s_tmp = s_tmp[:s_tmp.rfind('/')]
-            save_dir = '%s/iteration%d/%s' % (s_tmp, iteration, split_dir)
-            if cfg.TEST.B_EXAMPLE:
-                folder = '%s/super' % (save_dir)
-            else:
-                folder = '%s/single' % (save_dir)
-            print('Make a new folder: ', folder)
-            mkdir_p(folder)
-
-            nz = cfg.GAN.Z_DIM
-            noise = Variable(torch.FloatTensor(self.batch_size, nz))
-            if cfg.CUDA:
-                netG.cuda()
-                noise = noise.cuda()
-
-            # switch to evaluate mode
-            netG.eval()
-            num_batches = int(cfg.TEST.SAMPLE_NUM / self.batch_size)
-            cnt = 0
-            for step in xrange(num_batches):
-                noise.data.normal_(0, 1)
-                fake_imgs, _, _ = netG(noise)
-                if cfg.TEST.B_EXAMPLE:
-                    self.save_superimages(fake_imgs[-1], folder, cnt, 256)
-                else:
-                    self.save_singleimages(fake_imgs[-1], folder, cnt, 256)
-                    # self.save_singleimages(fake_imgs[-2], folder, 128)
-                    # self.save_singleimages(fake_imgs[-3], folder, 64)
-                cnt += self.batch_size
-
-
 # ################# Text to image task############################ #
 class condGANTrainer(object):
     def __init__(self, output_dir, label_loader, unlabel_loader):
@@ -551,7 +257,7 @@ class condGANTrainer(object):
         self.label_loader = label_loader
         self.unlabel_loader = unlabel_loader
         self.num_batches = len(self.unlabel_loader)
-
+        self.label_num_batches = len(self.label_loader)
     def prepare_data(self, data):
         imgs, labels, label_vectors = data
         #print(labels)
@@ -566,6 +272,7 @@ class condGANTrainer(object):
             labels = Variable(labels)
             #error_label_vectors = Variable(error_label_vectors)
         for i in range(self.num_Ds):
+            print("images_{}:{}".format(i, imgs[i].size()))
             if cfg.CUDA:
                 real_vimgs.append(Variable(imgs[i]).cuda())
             else:
@@ -592,19 +299,25 @@ class condGANTrainer(object):
         #print(logits_4)
         return logits_4
 
-    def log_sum_exp(logits, mask=None, inf=1e7):
-        if mask is not None:
-            logits = logits * mask - inf * (1.0 - mask)
-            max_logits = logits.max(1)[0]
-            return ((logits - max_logits.expand_as(logits)).exp() * mask).sum(1).log().squeeze() + max_logits.squeeze()
+    def log_sum_exp(self, value, dim=None, keepdim=True):
+        if dim is not None:
+            m, _ = torch.max(value, dim=dim, keepdim=True)
+            value0 = value - m
+            if keepdim is False:
+               m = m.squeeze(dim)
+            return m + torch.log(torch.sum(torch.exp(value0),
+                                       dim=dim, keepdim=keepdim))
         else:
-            max_logits = logits.max(1)[0]
-            return ((logits - max_logits.expand_as(logits)).exp()).sum(1).log().squeeze() + max_logits.squeeze()
-
-
+            m = torch.max(value)
+            sum_exp = torch.sum(torch.exp(value - m))
+            if isinstance(sum_exp, Number):
+                return m + math.log(sum_exp)
+            else:
+                return m + torch.log(sum_exp)
     def train_Dnet(self, idx, count):
         flag = count % 25
-        batch_size = self.real_imgs[0].size(0)
+        batch_size = cfg.TRAIN.BATCH_SIZE
+        print("batch_size:%d"%batch_size)
         criterion = self.criterion
 
         netD, optD = self.netsD[idx], self.optimizersD[idx]
@@ -616,9 +329,12 @@ class condGANTrainer(object):
         netD.zero_grad()
 
         lab_labels = self.labels[:batch_size].type(torch.LongTensor)
+        if cfg.CUDA:
+           lab_labels = lab_labels.cuda()
         error_labels = self.error_labels[:batch_size]
-        label_logits, label_softmax_out, label_hash_logits, _ = netD(label_imgs)
+        print("unlabel_imgs:{}".format(unlabel_imgs.size()))
         unlabel_logits, unlabel_softmax_out, unlabel_hash_logits, _ = netD(unlabel_imgs)
+        label_logits, label_softmax_out, label_hash_logits, _ = netD(label_imgs)
         fake_logits, fake_softmax_out, fake_hash_logits, _ = netD(fake_imgs.detach())
         fake2_logits, fake2_softmax_out, fake2_hash_logits, _ = netD(fake_imgs_2.detach())
 
@@ -631,9 +347,9 @@ class condGANTrainer(object):
         supvised_loss = lab_loss + fake_lab_loss + fake2_lab_loss
 
         # GAN true-fake loss   adversary stream
-        unl_logsumexp = self.log_sum_exp(unlabel_logits)
-        fake_logsumexp = self.log_sum_exp(fake_logits)
-        fake2_logsumexp = self.log_sum_exp(fake2_logits)
+        unl_logsumexp = self.log_sum_exp(unlabel_logits,1)
+        fake_logsumexp = self.log_sum_exp(fake_logits,1)
+        fake2_logsumexp = self.log_sum_exp(fake2_logits,1)
 
         true_loss = - 0.5 * torch.mean(unl_logsumexp) + 0.5 * torch.mean(F.softplus(unl_logsumexp))
         fake_loss = 0.5 * torch.mean(F.softplus(fake_logsumexp))
@@ -641,17 +357,20 @@ class condGANTrainer(object):
         adversary_loss = true_loss + fake_loss + fake2_loss
 
         # loss for hash
-        positive = torch.sum((label_hash_logits - fake_logits) ** 2, 1)
-        negtive = torch.sum((label_hash_logits - fake2_logits) ** 2, 1)
+        print("label_hash:{},fake_hash{}".format(label_hash_logits.size(), fake_logits.size()))
+        positive = torch.sum((label_hash_logits - fake_hash_logits) ** 2, 1)
+        negtive = torch.sum((label_hash_logits - fake2_hash_logits) ** 2, 1)
         hash_loss = 1 + positive - negtive
-        hash_loss[hash_loss < 0] = 0
-        hash_loss = torch.mean(hash_loss)
-        print("hash_loss:%f" % (hash_loss.data[0]))
+        hash_loss_temp = hash_loss > 0
+        hash_loss_temp = hash_loss_temp.type(torch.FloatTensor)
+        if cfg.CUDA:
+           hash_loss_temp = hash_loss_temp.cuda()
+        hash_loss = torch.mean(hash_loss * hash_loss_temp)
 
         d_total_loss = supvised_loss + adversary_loss + hash_loss
-        print("d_supervied_loss_{0}:{1}".format(idx, supvised_loss))
-        print("d_adversary_loss_{0}:{1}".format(idx, adversary_loss))
-        print("d_hash_loss_{0}:{1}".format(idx, hash_loss))
+        print("d_supervied_loss_{0}:{1}".format(idx, supvised_loss.data[0]))
+        print("d_adversary_loss_{0}:{1}".format(idx, adversary_loss.data[0]))
+        print("d_hash_loss_{0}:{1}".format(idx, hash_loss.data[0]))
         print("d_total_loss_{0}:{1}".format(idx, d_total_loss.data[0]))
 
 
@@ -700,7 +419,8 @@ class condGANTrainer(object):
         self.netG.zero_grad()
         errG_total = 0
         flag = count % 25
-        batch_size = self.real_imgs[0].size(0)
+        batch_size = cfg.TRAIN.BATCH_SIZE
+        print("batch_size:%d"%batch_size)
         criterion = self.criterion
 
         for i in range(self.num_Ds):
@@ -713,6 +433,8 @@ class condGANTrainer(object):
 
 
             lab_labels = self.labels[:batch_size].type(torch.LongTensor)
+            if cfg.CUDA:
+                lab_labels = lab_labels.cuda()
             error_labels = self.error_labels[:batch_size]
             label_logits, label_softmax_out, label_hash_logits, _ = netD(label_imgs)
             unlabel_logits, unlabel_softmax_out, unlabel_hash_logits, _ = netD(unlabel_imgs)
@@ -738,17 +460,19 @@ class condGANTrainer(object):
             adversary_loss = (true_loss + fake_loss + fake2_loss) / 3
 
             # loss for hash
-            positive = torch.sum((label_hash_logits - fake_logits) ** 2, 1)
-            negtive = torch.sum((label_hash_logits - fake2_logits) ** 2, 1)
+            positive = torch.sum((label_hash_logits - fake_hash_logits) ** 2, 1)
+            negtive = torch.sum((label_hash_logits - fake2_hash_logits) ** 2, 1)
             hash_loss = 1 + positive - negtive
-            hash_loss[hash_loss < 0] = 0
-            hash_loss = torch.mean(hash_loss)
-            print("hash_loss:%f" % (hash_loss.data[0]))
+            hash_loss_temp = hash_loss > 0
+	    hash_loss_temp = hash_loss_temp.type(torch.FloatTensor)
+            if cfg.CUDA:
+               hash_loss_temp = hash_loss_temp.cuda()
+            hash_loss = torch.mean(hash_loss * hash_loss_temp)
 
             g_total_loss = supvised_loss - adversary_loss + hash_loss
-            print("g_supervied_loss_{0}:{1}".format(i, supvised_loss))
-            print("g_adversary_loss_{0}:{1}".format(i, adversary_loss))
-            print("g_hash_loss_{0}:{1}".format(i, hash_loss))
+            print("g_supervied_loss_{0}:{1}".format(i, supvised_loss.data[0]))
+            print("g_adversary_loss_{0}:{1}".format(i, adversary_loss.data[0]))
+            print("g_hash_loss_{0}:{1}".format(i, hash_loss.data[0]))
             print("g_total_loss_{0}:{1}".format(i, g_total_loss.data[0]))
 
 
@@ -803,7 +527,7 @@ class condGANTrainer(object):
         # not use kl_loss
         # kl_loss = KL_loss(mu, logvar) * cfg.TRAIN.COEFF.KL
         # errG_total = errG_total + kl_loss
-        errG_total.backward()
+        errG_total.backward(retain_graph=True)
         self.optimizerG.step()
         return errG_total
 
@@ -874,6 +598,8 @@ class condGANTrainer(object):
         count = start_count
         start_epoch = start_count // (self.num_batches)
         label_iter = iter(self.label_loader)
+        cnt = 0
+        print("label_num_batch:{}".format(self.label_num_batches))
         for epoch in range(start_epoch, self.max_epoch):
             start_t = time.time()
 
@@ -884,7 +610,12 @@ class condGANTrainer(object):
                 #######################################################
                 # (0) Prepare training data
                 ######################################################
+                if cnt == self.label_num_batches:
+                   label_iter = iter(self.label_loader)
+                   cnt = 0
+                cnt += 1
                 label_data = label_iter.next()
+                #print(label_data[0])
                 self.label_imgs_tcpu, self.label_real_imgs, \
                 self.labels, self.label_vectors = self.prepare_data(label_data)
 
@@ -902,7 +633,7 @@ class condGANTrainer(object):
                 self.fake_imgs = \
                     self.netG(noise, self.label_vectors)
 
-                self.fake_imgs_2 = self.netG(noise_2, self.error_label_vectors)
+                self.fake_imgs_2 = self.netG(noise_2, self.error_label_vector)
 
                 #######################################################
                 # (2) Update D network
@@ -950,7 +681,7 @@ class condGANTrainer(object):
                     fixed_noise.data.normal_(0, 1)
                     self.fake_imgs = \
                         self.netG(fixed_noise, self.label_vectors)
-                    save_img_results(self.imgs_tcpu, self.fake_imgs, self.num_Ds,
+                    save_img_results(self.label_imgs_tcpu, self.fake_imgs, self.num_Ds,
                                      count, self.image_dir, self.summary_writer)
                     #
                     load_params(self.netG, backup_para)

@@ -88,7 +88,7 @@ class Cifar10Folder(data.Dataset):
         for i in range(cfg.TREE.BRANCH_NUM):
             self.imsize.append(base_size)
             base_size = base_size * 2
-
+        print(self.imsize)
     def make_dataset(self, filepath):
 
         with open(filepath, 'rb') as f:
