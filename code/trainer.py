@@ -912,7 +912,7 @@ class condGANTrainer(object):
 
             for i in range(cfg.TREE.BRANCH_NUM):
                 print('Load %s_%d.pth' % (cfg.TRAIN.NET_D, i))
-                state_dict = torch.load('%snetD%d_20000.pth' % (cfg.TRAIN.NET_D, i),
+                state_dict = torch.load('%snetD%d_70000.pth' % (cfg.TRAIN.NET_D, i),
                                         map_location=lambda storage, loc: storage)
                 netsD[i].load_state_dict(state_dict)
 
@@ -946,18 +946,20 @@ class condGANTrainer(object):
             y_scores = np.arange(y_true.shape[0],0,-1)
             ap = average_precision_score(y_true, y_scores)
             prec_total += ap
-            """
             if recall_total is None:
-                precision_total, recall_total, _ = precision_recall_curve(y_true, y_scores)
+                precision_total, recall_total, r = precision_recall_curve(y_true, y_scores)
                 print("precision_shape:{}".format(precision_total.shape))
                 print("recall_shape:{}".format(recall_total.shape))
             else:
-                precision, recall, _ = precision_recall_curve(y_true, y_scores)
-                print("precision_shape:{}".format(precision.shape))
-                print("recall_shape:{}".format(recall.shape))
-                precision_total = precision_total + precision
-                recall_total = recall_total + recall
-           """
+                precision, recall, r = precision_recall_curve(y_true, y_scores)
+                #if k % 100 == 0:
+                    #print(r)
+                #print("precision_shape:{}".format(precision.shape))
+                #print("recall_shape:{}".format(recall.shape))
+                #precision_total = precision_total + precision
+                #recall_total = recall_total + recall
+        print(precision[5800:])
+        print(recall[:20])  
         test_num = test_features.shape[0]
         MAP = prec_total / test_num
         #recall_total = [i/test_num for i in recall_total]
