@@ -11,8 +11,6 @@ import datetime
 import dateutil.tz
 import time
 from datasets import Cifar10Folder
-import config
-import data
 
 dir_path = (os.path.abspath(os.path.join(os.path.realpath(__file__), './.')))
 sys.path.append(dir_path)
@@ -43,8 +41,8 @@ if __name__ == "__main__":
 
     if args.data_dir != '':
         cfg.DATA_DIR = args.data_dir
-    print('Using config:')
-    pprint.pprint(cfg)
+    #print('Using config:')
+    # pprint.pprint(cfg)
 
     if not cfg.TRAIN.FLAG:
         args.manualSeed = 100
@@ -82,10 +80,10 @@ if __name__ == "__main__":
 
     if cfg.DATA_DIR.find('cifar10') != -1:
         label_dataset = Cifar10Folder(cfg.DATA_DIR, "cifar10_label",
-                                      base_size=cfg.TRAIN.BATCH_SIZE,
+                                      base_size=cfg.TREE.BASE_SIZE,
                                       transform=image_transform)
         unlabel_dataset = Cifar10Folder(cfg.DATA_DIR, "cifar10_unlabel",
-                                        base_size=cfg.TRAIN.BATCH_SIZE,
+                                        base_size=cfg.TREE.BASE_SIZE,
                                         transform=image_transform)
 
     elif cfg.DATA_DIR.find('imagenet') != -1:
@@ -97,7 +95,7 @@ if __name__ == "__main__":
         label_dataset, batch_size=cfg.TRAIN.BATCH_SIZE * num_gpu,
         drop_last=True, shuffle=True, num_workers=int(cfg.WORKERS))
     unlabel_loader = torch.utils.data.DataLoader(
-        label_dataset, batch_size=cfg.TRAIN.BATCH_SIZE * num_gpu,
+        unlabel_dataset, batch_size=cfg.TRAIN.BATCH_SIZE * num_gpu,
         drop_last=True, shuffle=True, num_workers=int(cfg.WORKERS))
 
 

@@ -3,10 +3,10 @@ CONFIG_NAME: 'cifar10_sup'
 DATASET_NAME: 'cifar10'
 DATA_DIR: '../data/cifar10'
 GPU_ID: '-1'
-WORKERS: 1 # 4
+WORKERS: 2 # 4
 
 TREE:
-    BRANCH_NUM: 2
+    BRANCH_NUM: 3
     BASE_SIZE: 32
 
 
@@ -18,7 +18,7 @@ TEST:
 TRAIN:
     FLAG: False
     NET_D: 'model/'
-    BATCH_SIZE: 10
+    BATCH_SIZE: 100
 
 
 GAN:
@@ -28,4 +28,4 @@ GAN:
     R_NUM: 2
     B_CONDITION: True
     CLASS_NUM: 10
-    HASH_DIM: 12
+    HASH_DIM: 48

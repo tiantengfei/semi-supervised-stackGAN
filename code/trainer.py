@@ -830,11 +830,14 @@ class condGANTrainer(object):
                     self.save_superimages(fake_img_list, filenames,
                                           save_dir, split_dir, 256)
 
-    def get_hash(self, dataloader, netsD, dataset_name):
+    def get_hash(self, dataloader, netsD, dataset_name,save_steps):
         hash_dict = {}
-        imgs_total = None
+        #imgs_total = None
         label_total = None
         output_dir = os.path.join("eval", dataset_name)
+        print("len:%d"%len(self.unlabel_loader))
+        #save_steps = len(self.unlabel_loader) / 10
+
         if not os.path.exists(output_dir):
             os.mkdir(output_dir)
 
@@ -858,24 +861,32 @@ class condGANTrainer(object):
             else:
                 label_total = torch.cat((label_total, labels), 0)
                 imgs_total = torch.cat((imgs_total, real_imgs[0]), 0)
+            
+            if (step+1) % save_steps == 0:
+                cnt = (step + 1) / save_steps
+                output_img = os.path.join(output_dir, "%s_images_%d.npy" % (dataset_name, cnt))
+                output_label = os.path.join(output_dir, "%s_label_%d.npy" % (dataset_name, cnt))
 
+                if cfg.CUDA:
+                    np.save(output_img, imgs_total.cpu().data.numpy())
+                    np.save(output_label, label_total.cpu().data.numpy())
+                else:
+                    np.save(output_img, imgs_total.data.numpy())
+                    np.save(output_label, label_total.data.numpy())
+
+                for i in range(cfg.TREE.BRANCH_NUM):
+                    output_hash = os.path.join(output_dir, "branch_%d_hash_%s_%d.npy" % (i, dataset_name, cnt))
+                    if cfg.CUDA:
+                        np.save(output_hash, hash_dict[i].cpu().data.numpy())
+                    else:
+                        np.save(output_hash, hash_dict[i].data.numpy())
+
+                imgs_total = None
+                label_total = None
+                hash_dict= {}
             print("step %d done!" % step)
-        print(hash_dict[0].size())
-        print(label_total.size())
+            print("step %d done!" % step)
 
-        output_img = os.path.join(output_dir, dataset_name+"_images.npy")
-        np.save(output_img, imgs_total.data.numpy())
-
-        output_label = os.path.join(output_dir, dataset_name + "_label.npy")
-        np.save(output_label, label_total.data.numpy())
-
-        if label_total is not None:
-            for i in range(cfg.TREE.BRANCH_NUM):
-                output_hash = os.path.join(output_dir, "branch_%d_hash_%s.npy" % (i, dataset_name))
-                np.save(output_hash, hash_dict[i].data.numpy())
-
-            # print("total images is %d" % (step * cfg.TRAIN.BATCH_SIZE))
-            # return hash_dict, img_dict, label_total
 
     def load_Dnet(self, gpus):
         if cfg.TRAIN.NET_D == '':
@@ -901,7 +912,7 @@ class condGANTrainer(object):
 
             for i in range(cfg.TREE.BRANCH_NUM):
                 print('Load %s_%d.pth' % (cfg.TRAIN.NET_D, i))
-                state_dict = torch.load('%snetD%d_16000.pth' % (cfg.TRAIN.NET_D, i),
+                state_dict = torch.load('%snetD%d_20000.pth' % (cfg.TRAIN.NET_D, i),
                                         map_location=lambda storage, loc: storage)
                 netsD[i].load_state_dict(state_dict)
 
@@ -910,13 +921,12 @@ class condGANTrainer(object):
                     netsD[i].cuda()
             return netsD
 
-    def get_numpy(self, root, files):
-        print(files)
+    def get_numpy(self, files):
         arr = None
+        print(files)
         for f in files:
-            path = os.path.join(root, f)
-            a = np.load(path)
-            print("a:{0}".format(a.shape))
+            a = np.load(f)
+            #print("a:{0}".format(a.shape))
             if arr is not None:
                 arr = np.concatenate((arr, a), axis=0)
             else:
@@ -936,39 +946,45 @@ class condGANTrainer(object):
             y_scores = np.arange(y_true.shape[0],0,-1)
             ap = average_precision_score(y_true, y_scores)
             prec_total += ap
-
+            """
             if recall_total is None:
                 precision_total, recall_total, _ = precision_recall_curve(y_true, y_scores)
+                print("precision_shape:{}".format(precision_total.shape))
+                print("recall_shape:{}".format(recall_total.shape))
             else:
                 precision, recall, _ = precision_recall_curve(y_true, y_scores)
+                print("precision_shape:{}".format(precision.shape))
+                print("recall_shape:{}".format(recall.shape))
                 precision_total = precision_total + precision
                 recall_total = recall_total + recall
-
+           """
         test_num = test_features.shape[0]
         MAP = prec_total / test_num
-        recall_total = [i/test_num for i in recall_total]
-        precision_total = [i / test_num for i in precision_total]
+        #recall_total = [i/test_num for i in recall_total]
+        #precision_total = [i / test_num for i in precision_total]
 
         print("MAP: %f" % MAP)
-        print("recall:{0}".format(recall_total[:30]))
-        print("precision:{0}".format(precision_total[:30]))
+        #print("recall:{0}".format(recall_total[:30]))
+       # print("precision:{0}".format(precision_total[:30]))
 
         with open(metric + "_result.txt", 'w') as f:
             f.write("MAP:%f\n" % MAP)
-            f.write("recall\n:{0}".format(recall_total))
-            f.write("precision\n:{0}".format(precision_total))
+            #f.write("recall\n:{0}".format(recall_total))
+            #f.write("precision\n:{0}".format(precision_total))
 
-        np.save("recall.npy", recall_total)
-        np.save("precision.npy", precision_total)
+        #np.save("recall.npy", recall_total)
+        #np.save("precision.npy", precision_total)
 
     def compute_MAP(self, root, branch, query_labels, db_labels):
 
-        query_hash_path = os.path.join(root, "test", "branch_%d_hash_%s.npy" % (branch, "test"))
-        db_hash_path = os.path.join(root, "db", "branch_%d_hash_%s.npy" % (branch, "db"))
-
-        query_hashs = np.load(query_hash_path)
-        db_hashs = np.load(db_hash_path)
-
+        query_npys = os.listdir(os.path.join(root, "test"))
+        db_npys = os.listdir(os.path.join(root, "db"))
+        query_npys.sort()
+        db_npys.sort()
+        query_hash_path = [os.path.join(root, "test", i) for i in query_npys if "branch_" + str(branch) in i]
+        db_hash_path = [os.path.join(root, "db", i) for i in db_npys if "branch_" + str(branch) in i]
+        query_hashs = self.get_numpy(query_hash_path)
+        db_hashs = self.get_numpy(db_hash_path)
         assert db_labels.shape[0] == db_hashs.shape[0], "db labels num must be equal to db hash num"
         assert query_labels.shape[0] == query_hashs.shape[0], "db labels num must be equal to db hash num"
 
@@ -977,7 +993,7 @@ class condGANTrainer(object):
         print("-----------------------------------use hash--------------------------")
         query_h = query_hashs > 0.5
         db_h= db_hashs > 0.5
-        self.compute_MAP_sklearn(query_hashs, db_hashs, query_labels, db_labels)
+        self.compute_MAP_sklearn(query_h, db_h, query_labels, db_labels)
 
         return db_hashs, query_hashs
 
@@ -1105,21 +1121,28 @@ class condGANTrainer(object):
 
     def evaluate_MAP(self, db_dataloader, query_dataloader, root):
 
+        netsD = self.load_Dnet(self.gpus)
         if len(os.listdir(os.path.join(root, "test"))) == 0:
-            netsD = self.load_Dnet(self.gpus)
-            self.get_hash(query_dataloader, netsD, "test")
+            save_steps = len(query_dataloader) / 10
+            self.get_hash(query_dataloader, netsD, "test", save_steps)
             print("get query image hash")
-            self.get_hash(db_dataloader, netsD, "db")
+       
+        if len(os.listdir(os.path.join(root, "db"))) == 0:
+            save_steps = len(db_dataloader) / 10
+            self.get_hash(db_dataloader, netsD, "db", save_steps)
             print("get db image hash!")
 
         eval_path = root
         db_hashs = None
         query_hashs = None
-        query_label_path = os.path.join(root, "test", "test_label.npy")
-        db_label_path = os.path.join(root, "db", "db_label.npy")
-        query_labels = np.load(query_label_path)
-        db_labels = np.load(db_label_path)
-
+        query_npys = os.listdir(os.path.join(root, "test"))
+        query_npys.sort()
+        query_label_path = [os.path.join(root, "test", i) for i in query_npys if "label" in i]
+        db_npys = os.listdir(os.path.join(root, "db"))
+        db_npys.sort()
+        db_label_path = [os.path.join(root, "db", i) for i in db_npys if "label" in i]
+        query_labels = self.get_numpy(query_label_path)
+        db_labels = self.get_numpy(db_label_path)
         for i in range(cfg.TREE.BRANCH_NUM):
             print("--------------------------branch %d-------------------------------------------" % i)
             db_hash, query_hash = self.compute_MAP(eval_path, i, query_labels, db_labels)
