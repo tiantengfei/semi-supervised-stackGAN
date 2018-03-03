@@ -354,7 +354,7 @@ class condGANTrainer(object):
         true_loss = - 0.5 * torch.mean(unl_logsumexp) + 0.5 * torch.mean(F.softplus(unl_logsumexp))
         fake_loss = 0.5 * torch.mean(F.softplus(fake_logsumexp))
         fake2_loss = 0.5 * torch.mean(F.softplus(fake2_logsumexp))
-        adversary_loss = true_loss + fake_loss + fake2_loss
+        adversary_loss = (true_loss + fake_loss + fake2_loss) / 3
 
         # loss for hash
         print("label_hash:{},fake_hash{}".format(label_hash_logits.size(), fake_logits.size()))
