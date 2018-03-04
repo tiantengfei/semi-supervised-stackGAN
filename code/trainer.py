@@ -299,7 +299,7 @@ class condGANTrainer(object):
         #print(logits_4)
         return logits_4
 
-    def log_sum_exp(self, value, dim=None, keepdim=True):
+    def log_sum_exp(self, value, dim=None, keepdim=False):
         if dim is not None:
             m, _ = torch.max(value, dim=dim, keepdim=True)
             value0 = value - m
@@ -347,9 +347,9 @@ class condGANTrainer(object):
         supvised_loss = (lab_loss + fake_lab_loss + fake2_lab_loss) / 3
 
         # GAN true-fake loss   adversary stream
-        unl_logsumexp = self.log_sum_exp(unlabel_logits)
-        fake_logsumexp = self.log_sum_exp(fake_logits)
-        fake2_logsumexp = self.log_sum_exp(fake2_logits)
+        unl_logsumexp = self.log_sum_exp(unlabel_logits,1)
+        fake_logsumexp = self.log_sum_exp(fake_logits,1)
+        fake2_logsumexp = self.log_sum_exp(fake2_logits,1)
 
         true_loss = -0.5 * torch.mean(unl_logsumexp) + 0.5 * torch.mean(F.softplus(unl_logsumexp))
         fake_loss = 0.5 * torch.mean(F.softplus(fake_logsumexp))
@@ -449,9 +449,9 @@ class condGANTrainer(object):
             supvised_loss = (lab_loss + fake_lab_loss + fake2_lab_loss) / 3
 
             # GAN true-fake loss   adversary stream
-            unl_logsumexp = self.log_sum_exp(unlabel_logits)
-            fake_logsumexp = self.log_sum_exp(fake_logits)
-            fake2_logsumexp = self.log_sum_exp(fake2_logits)
+            unl_logsumexp = self.log_sum_exp(unlabel_logits,1)
+            fake_logsumexp = self.log_sum_exp(fake_logits,1)
+            fake2_logsumexp = self.log_sum_exp(fake2_logits,1)
 
             true_loss = -0.5 * torch.mean(unl_logsumexp) + 0.5 * torch.mean(F.softplus(unl_logsumexp))
             fake_loss =   0.5 * torch.mean(F.softplus(fake_logsumexp))
