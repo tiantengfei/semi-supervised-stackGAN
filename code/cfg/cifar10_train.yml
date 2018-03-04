@@ -1,4 +1,4 @@
-CONFIG_NAME: 'cifar10_main_48'
+CONFIG_NAME: 'cifar10_try_48'
 
 DATASET_NAME: 'cifar10'
 DATA_DIR: '../data/cifar10'
