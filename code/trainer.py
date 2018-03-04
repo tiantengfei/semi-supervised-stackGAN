@@ -348,13 +348,15 @@ class condGANTrainer(object):
 
         # GAN true-fake loss   adversary stream
         unl_logsumexp = self.log_sum_exp(unlabel_logits,1)
+        lab_logsumexp = self.log_sum_exp(label_logits,1)
         fake_logsumexp = self.log_sum_exp(fake_logits,1)
         fake2_logsumexp = self.log_sum_exp(fake2_logits,1)
 
         true_loss = -0.5 * torch.mean(unl_logsumexp) + 0.5 * torch.mean(F.softplus(unl_logsumexp))
+        true_lab_loss = -0.5 * torch.mean(lab_logsumexp) + 0.5 * torch.mean(F.softplus(lab_logsumexp))
         fake_loss = 0.5 * torch.mean(F.softplus(fake_logsumexp))
         fake2_loss = 0.5 * torch.mean(F.softplus(fake2_logsumexp))
-        adversary_loss = (true_loss +  fake_loss + fake2_loss) / 3 
+        adversary_loss = true_loss +  fake_loss + fake2_loss + true_lab_loss 
         # loss for hash
         print("label_hash:{},fake_hash{}".format(label_hash_logits.size(), fake_logits.size()))
         positive = torch.sum((label_hash_logits - fake_hash_logits) ** 2, 1)
@@ -450,13 +452,16 @@ class condGANTrainer(object):
 
             # GAN true-fake loss   adversary stream
             unl_logsumexp = self.log_sum_exp(unlabel_logits,1)
+            lab_logsumexp = self.log_sum_exp(label_logits,1)
             fake_logsumexp = self.log_sum_exp(fake_logits,1)
             fake2_logsumexp = self.log_sum_exp(fake2_logits,1)
 
-            true_loss = -0.5 * torch.mean(unl_logsumexp) + 0.5 * torch.mean(F.softplus(unl_logsumexp))
-            fake_loss =   0.5 * torch.mean(F.softplus(fake_logsumexp))
-            fake2_loss =  0.5 * torch.mean(F.softplus(fake2_logsumexp))
-            adversary_loss =  (true_loss + fake_loss + fake2_loss) / 3   
+            fake_loss = -0.5 * torch.mean(fake_logsumexp) + 0.5 * torch.mean(F.softplus(fake_logsumexp))
+            fake2_loss = -0.5 * torch.mean(fake2_logsumexp) + 0.5 * torch.mean(F.softplus(fake2_logsumexp))
+            #true_lab_loss = -0.5 * torch.mean(lab_logsumexp) + 0.5 * torch.mean(F.softplus(lab_logsumexp))
+            #fake_loss =   1 - 0.5 * torch.mean(F.softplus(fake_logsumexp))
+            #fake2_loss =  1 - 0.5 * torch.mean(F.softplus(fake2_logsumexp))
+            adversary_loss = fake_loss + fake2_loss  
             # loss for hash
             positive = torch.sum((label_hash_logits - fake_hash_logits) ** 2, 1)
             negtive = torch.sum((label_hash_logits - fake2_hash_logits) ** 2, 1)
@@ -467,7 +472,7 @@ class condGANTrainer(object):
                hash_loss_temp = hash_loss_temp.cuda()
             hash_loss = torch.mean(hash_loss * hash_loss_temp)
 
-            g_total_loss = supvised_loss - adversary_loss + hash_loss
+            g_total_loss = supvised_loss + adversary_loss + hash_loss
             print("g_supervied_loss_{0}:{1}".format(i, supvised_loss.data[0]))
             print("g_adversary_loss_{0}:{1}".format(i, adversary_loss.data[0]))
             print("g_hash_loss_{0}:{1}".format(i, hash_loss.data[0]))
