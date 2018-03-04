@@ -1,4 +1,4 @@
-CONFIG_NAME: 'cifar10_sup'
+CONFIG_NAME: 'cifar10_32'
 
 DATASET_NAME: 'cifar10'
 DATA_DIR: '../data/cifar10'
@@ -30,7 +30,7 @@ GAN:
     R_NUM: 2
     B_CONDITION: True
     CLASS_NUM: 10
-    HASH_DIM: 48
+    HASH_DIM: 32
 
 
 

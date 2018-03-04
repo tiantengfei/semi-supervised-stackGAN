@@ -344,7 +344,7 @@ class condGANTrainer(object):
         fake_lab_loss = criterion(fake_logits, lab_labels)
         fake2_lab_loss = criterion(fake_logits, error_labels)
 
-        supvised_loss = lab_loss + fake_lab_loss + fake2_lab_loss
+        supvised_loss = (lab_loss + fake_lab_loss + fake2_lab_loss) / 3
 
         # GAN true-fake loss   adversary stream
         unl_logsumexp = self.log_sum_exp(unlabel_logits,1)
@@ -961,6 +961,7 @@ class condGANTrainer(object):
         print(precision[5800:])
         print(recall[:20])  
         test_num = test_features.shape[0]
+        print("test_num:{}".format(test_num))
         MAP = prec_total / test_num
         #recall_total = [i/test_num for i in recall_total]
         #precision_total = [i / test_num for i in precision_total]
