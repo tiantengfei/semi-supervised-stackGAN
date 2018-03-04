@@ -348,15 +348,13 @@ class condGANTrainer(object):
 
         # GAN true-fake loss   adversary stream
         unl_logsumexp = self.log_sum_exp(unlabel_logits)
-        label_logsumexp = self.log_sum_exp(label_logits)
         fake_logsumexp = self.log_sum_exp(fake_logits)
         fake2_logsumexp = self.log_sum_exp(fake2_logits)
 
-        true_loss = - 0.5 * torch.mean(unl_logsumexp) + 0.5 * torch.mean(F.softplus(unl_logsumexp))
-        true_label_loss = - 0.5 * torch.mean(label_logsumexp) + 0.5 * torch.mean(F.softplus(label_logsumexp))
-        fake_loss = 0.5 * torch.mean(F.softplus(fake_logsumexp))
-        fake2_loss = 0.5 * torch.mean(F.softplus(fake2_logsumexp))
-        adversary_loss = (true_loss + fake_loss + fake2_loss + true_label_loss) / 4
+        true_loss = -torch.mean(unl_logsumexp) + torch.mean(F.softplus(unl_logsumexp))
+        fake_loss = torch.mean(F.softplus(fake_logsumexp))
+        fake2_loss = torch.mean(F.softplus(fake2_logsumexp))
+        adversary_loss = true_loss +  fake_loss + fake2_loss    
         # loss for hash
         print("label_hash:{},fake_hash{}".format(label_hash_logits.size(), fake_logits.size()))
         positive = torch.sum((label_hash_logits - fake_hash_logits) ** 2, 1)
@@ -452,15 +450,13 @@ class condGANTrainer(object):
 
             # GAN true-fake loss   adversary stream
             unl_logsumexp = self.log_sum_exp(unlabel_logits)
-            label_logsumexp = self.log_sum_exp(label_logits)
             fake_logsumexp = self.log_sum_exp(fake_logits)
             fake2_logsumexp = self.log_sum_exp(fake2_logits)
 
-            true_loss = - 0.5 * torch.mean(unl_logsumexp) + 0.5 * torch.mean(F.softplus(unl_logsumexp))
-            true_label_loss = - 0.5 * torch.mean(label_logsumexp) + 0.5 * torch.mean(F.softplus(label_logsumexp))
-            fake_loss = 0.5 * torch.mean(F.softplus(fake_logsumexp))
-            fake2_loss = 0.5 * torch.mean(F.softplus(fake2_logsumexp))
-            adversary_loss = (true_loss + fake_loss + fake2_loss + true_label_loss) / 4
+            true_loss = -torch.mean(unl_logsumexp) + torch.mean(F.softplus(unl_logsumexp))
+            fake_loss =   torch.mean(F.softplus(fake_logsumexp))
+            fake2_loss =  torch.mean(F.softplus(fake2_logsumexp))
+            adversary_loss =  (true_loss + fake_loss + fake2_loss) / 5   
             # loss for hash
             positive = torch.sum((label_hash_logits - fake_hash_logits) ** 2, 1)
             negtive = torch.sum((label_hash_logits - fake2_hash_logits) ** 2, 1)
@@ -496,37 +492,7 @@ class condGANTrainer(object):
                 self.summary_writer.add_summary(summary_D2, count)
                 self.summary_writer.add_summary(summary_D3, count)
 
-        #
-        # # Compute color consistency losses
-        # if cfg.TRAIN.COEFF.COLOR_LOSS > 0:
-        #     if self.num_Ds > 1:
-        #         mu1, covariance1 = compute_mean_covariance(self.fake_imgs[-1])
-        #         mu2, covariance2 = \
-        #             compute_mean_covariance(self.fake_imgs[-2].detach())
-        #         like_mu2 = cfg.TRAIN.COEFF.COLOR_LOSS * nn.MSELoss()(mu1, mu2)
-        #         like_cov2 = cfg.TRAIN.COEFF.COLOR_LOSS * 5 * \
-        #                     nn.MSELoss()(covariance1, covariance2)
-        #         errG_total = errG_total + like_mu2 + like_cov2
-        #         if flag == 0:
-        #             sum_mu = summary.scalar('G_like_mu2', like_mu2.data[0])
-        #             self.summary_writer.add_summary(sum_mu, count)
-        #             sum_cov = summary.scalar('G_like_cov2', like_cov2.data[0])
-        #             self.summary_writer.add_summary(sum_cov, count)
-        #     if self.num_Ds > 2:
-        #         mu1, covariance1 = compute_mean_covariance(self.fake_imgs[-2])
-        #         mu2, covariance2 = \
-        #             compute_mean_covariance(self.fake_imgs[-3].detach())
-        #         like_mu1 = cfg.TRAIN.COEFF.COLOR_LOSS * nn.MSELoss()(mu1, mu2)
-        #         like_cov1 = cfg.TRAIN.COEFF.COLOR_LOSS * 5 * \
-        #                     nn.MSELoss()(covariance1, covariance2)
-        #         errG_total = errG_total + like_mu1 + like_cov1
-        #         if flag == 0:
-        #             sum_mu = summary.scalar('G_like_mu1', like_mu1.data[0])
-        #             self.summary_writer.add_summary(sum_mu, count)
-        #             sum_cov = summary.scalar('G_like_cov1', like_cov1.data[0])
-        #             self.summary_writer.add_summary(sum_cov, count)
-
-        # not use kl_loss
+        
         # kl_loss = KL_loss(mu, logvar) * cfg.TRAIN.COEFF.KL
         # errG_total = errG_total + kl_loss
         errG_total.backward(retain_graph=True)
@@ -914,7 +880,7 @@ class condGANTrainer(object):
 
             for i in range(cfg.TREE.BRANCH_NUM):
                 print('Load %s_%d.pth' % (cfg.TRAIN.NET_D, i))
-                state_dict = torch.load('%snetD%d_55000.pth' % (cfg.TRAIN.NET_D, i),
+                state_dict = torch.load('%snetD%d_60000.pth' % (cfg.TRAIN.NET_D, i),
                                         map_location=lambda storage, loc: storage)
                 netsD[i].load_state_dict(state_dict)
 
