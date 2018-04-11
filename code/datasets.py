@@ -39,7 +39,13 @@ def is_image_file(filename):
 
 def get_imgs(img, imsize, bbox=None,
              transform=None, normalize=None):
-    img = Image.fromarray(img)
+    #print(type(img.shape))
+    if cfg.DATASET_NAME == "mnist":
+        img = np.reshape(img, (28,28))
+        img = Image.fromarray(img)
+        img = img.resize((32,32))
+    else:
+        img = Image.fromarray(img)
     width, height = img.size
     if bbox is not None:
         r = int(np.maximum(bbox[2], bbox[3]) * 0.75)
@@ -61,7 +67,6 @@ def get_imgs(img, imsize, bbox=None,
         else:
             re_img = img
         ret.append(normalize(re_img))
-
     return ret
 
 class Cifar10Folder(data.Dataset):
@@ -70,7 +75,7 @@ class Cifar10Folder(data.Dataset):
 
         self.filename = filename
         filepath = os.path.join(root, filename+'.pkl')
-        self.imgs, self.labels, self.fnames, self.label_vectors = self.make_dataset(filepath)
+        self.imgs, self.labels,self.label_vectors = self.make_dataset(filepath)
         if len(self.imgs) == 0:
             raise (RuntimeError("Found 0 images in subfolders of: " + root + "\n"
                                                                              "Supported image extensions are: " + ",".join(
@@ -88,17 +93,22 @@ class Cifar10Folder(data.Dataset):
         for i in range(cfg.TREE.BRANCH_NUM):
             self.imsize.append(base_size)
             base_size = base_size * 2
-        print(self.imsize)
+        #print(self.imsize)
     def make_dataset(self, filepath):
 
         with open(filepath, 'rb') as f:
             images = pickle.load(f)
         #print('The number of images: ', len(images['image_train']))
-        ims, labels, fnames, label_vectors = zip(*(images[self.filename]))
+        if "cifar10" in filepath:
+            ims, labels, fnames, label_vectors = zip(*(images[self.filename]))
+            train_data = np.array(ims).reshape((len(ims), 3, 32, 32))
+            train_data = train_data.transpose((0, 2, 3, 1))  # convert to HWC
+        else:
+            ims, labels, label_vectors = zip(*(images[self.filename]))
+            train_data = np.array(ims).reshape((len(ims), 28,28,1))
         #print("vectors:{0}".format(label_vectors))
-        train_data = np.array(ims).reshape((len(ims), 3, 32, 32))
-        train_data = train_data.transpose((0, 2, 3, 1))  # convert to HWC
-        return train_data, labels, fnames, label_vectors
+
+        return train_data, labels, label_vectors
 
     def __getitem__(self, index):
 
@@ -175,7 +185,7 @@ class ImageFolder(data.Dataset):
         imgs_list = get_imgs(path, self.imsize,
                              transform=self.transform,
                              normalize=self.norm)
-        print("images:{0}".format(imgs_list[0].shape))
+        #print("images:{0}".format(imgs_list[0].shape))
         return imgs_list
 
     def __len__(self):

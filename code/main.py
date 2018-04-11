@@ -86,10 +86,13 @@ if __name__ == "__main__":
                                         base_size=cfg.TREE.BASE_SIZE,
                                         transform=image_transform)
 
-    elif cfg.DATA_DIR.find('imagenet') != -1:
-       pass
-    elif cfg.GAN.B_CONDITION:
-        pass
+    elif cfg.DATA_DIR.find('mnist') != -1:
+        label_dataset = Cifar10Folder(cfg.DATA_DIR, "mnist_label",
+                                      base_size=cfg.TREE.BASE_SIZE,
+                                      transform=image_transform)
+        unlabel_dataset = Cifar10Folder(cfg.DATA_DIR, "mnist_unlabel",
+                                        base_size=cfg.TREE.BASE_SIZE,
+                                        transform=image_transform)
 
     label_loader = torch.utils.data.DataLoader(
         label_dataset, batch_size=cfg.TRAIN.BATCH_SIZE * num_gpu,
@@ -107,22 +110,31 @@ if __name__ == "__main__":
     if cfg.TRAIN.FLAG:
         algo.train()
     else:
-        db_dataset = Cifar10Folder(cfg.DATA_DIR, "cifar10_unlabel",
+       if cfg.DATA_DIR.find('cifar10') != -1:
+
+            db_dataset = Cifar10Folder(cfg.DATA_DIR, "cifar10_unlabel",
                                    base_size=cfg.TREE.BASE_SIZE,
                                    transform=image_transform)
-        test_dataset = Cifar10Folder(cfg.DATA_DIR, "cifar10_test",
+            test_dataset = Cifar10Folder(cfg.DATA_DIR, "cifar10_test",
+                                     base_size=cfg.TREE.BASE_SIZE,
+                                     transform=image_transform)
+       if cfg.DATA_DIR.find('mnist') != -1:
+            db_dataset = Cifar10Folder(cfg.DATA_DIR, "mnist_unlabel",
+                                   base_size=cfg.TREE.BASE_SIZE,
+                                   transform=image_transform)
+            test_dataset = Cifar10Folder(cfg.DATA_DIR, "mnist_test",
                                      base_size=cfg.TREE.BASE_SIZE,
                                      transform=image_transform)
 
-        db_dataloader = torch.utils.data.DataLoader(
+       db_dataloader = torch.utils.data.DataLoader( \
             db_dataset, batch_size=cfg.TRAIN.BATCH_SIZE,  # * num_gpu,
             drop_last=True, shuffle=bshuffle, num_workers=int(cfg.WORKERS))
 
-        test_dataloader = torch.utils.data.DataLoader(
+       test_dataloader = torch.utils.data.DataLoader(
             test_dataset, batch_size=cfg.TRAIN.BATCH_SIZE,  # * num_gpu,
             drop_last=True, shuffle=bshuffle, num_workers=int(cfg.WORKERS))
 
-        algo.evaluate_MAP(db_dataloader, test_dataloader, "eval")
+       algo.evaluate_MAP(db_dataloader, test_dataloader, "eval")
 
     end_t = time.time()
     print('Total time for training:', end_t - start_t)

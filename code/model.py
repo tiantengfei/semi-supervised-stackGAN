@@ -48,6 +48,7 @@ class GLU(nn.Module):
         super(GLU, self).__init__()
 
     def forward(self, x):
+        print("glu:{}".format(x.size()))
         nc = x.size(1)
         assert nc % 2 == 0, 'channels dont divide 2!'
         nc = int(nc / 2)
@@ -159,20 +160,20 @@ class INIT_STAGE_G(nn.Module):
             in_code = torch.cat((c_code, z_code), 1)
         else:
             in_code = z_code
-        # print("init:ngf:{0}".format(self.gf_dim))
+        #print("init:ngf:{0}".format(self.gf_dim))
         # state size 16ngf x 4 x 4  ngf=64
         out_code = self.fc(in_code)
         out_code = out_code.view(-1, self.gf_dim, 4, 4)  # [64 * 16, 4, 4]
         # state size 8ngf x 8 x 8
         # upsample: [1024,4,4]-> [1024, 8, 8]-> [1024, 8, 8]-> [1024, 8,8]-> [512, 8,8]
         out_code = self.upsample1(out_code)
-        # print("init:upsample1 size: {0}".format(out_code.size()))
+        #print("init:upsample1 size: {0}".format(out_code.size()))
         # state size 4ngf x 16 x 16
         out_code = self.upsample2(out_code)
-        # print("init:upsample2 size: {0}".format(out_code.size()))
+        #print("init:upsample2 size: {0}".format(out_code.size()))
         # state size 2ngf x 32 x 32
         out_code = self.upsample3(out_code)
-        # print("init:upsample3 size: {0}".format(out_code.size()))
+        #print("init:upsample3 size: {0}".format(out_code.size()))
         # state size ngf x 64 x 64
         # out_code = self.upsample4(out_code)
         # print("upsample4 size: {0}".format(out_code.size()))
@@ -213,9 +214,8 @@ class NEXT_STAGE_G(nn.Module):
         # state size (ngf+egf) x in_size x in_size [batch_size, 164, 64, 64]
 
         # print("s_size:{0}".format(s_size))
-        # print("c_code:{0}".format(c_code.size()))
-        # print("h_code:{0}".format(h_code.size()))
         h_c_code = torch.cat((c_code, h_code), 1)
+      
         # state size ngf x in_size x in_size
         out_code = self.jointConv(h_c_code)
         out_code = self.residual(out_code)
@@ -228,9 +228,12 @@ class NEXT_STAGE_G(nn.Module):
 class GET_IMAGE_G(nn.Module):
     def __init__(self, ngf):
         super(GET_IMAGE_G, self).__init__()
+        channel = 3
+        if cfg.DATASET_NAME == "mnist":
+            channel = 1
         self.gf_dim = ngf
         self.img = nn.Sequential(
-            conv3x3(ngf, 3),
+            conv3x3(ngf, channel),
             nn.Tanh()
         )
 
@@ -253,7 +256,6 @@ class G_NET(nn.Module):
         if cfg.TREE.BRANCH_NUM > 0:
             self.h_net1 = INIT_STAGE_G(self.gf_dim * 8)
             self.img_net1 = GET_IMAGE_G(self.gf_dim)
-            # print("img_net1 size:{0}".format(self.img_net1.size))
         if cfg.TREE.BRANCH_NUM > 1:
             self.h_net2 = NEXT_STAGE_G(self.gf_dim)
             self.img_net2 = GET_IMAGE_G(self.gf_dim // 2)
@@ -275,8 +277,9 @@ class G_NET(nn.Module):
         fake_imgs = []
         if cfg.TREE.BRANCH_NUM > 0:
             h_code1 = self.h_net1(c_code)
+            #print("h_code1:{}".format(h_code1.size()))
             fake_img1 = self.img_net1(h_code1)
-            # print(fake_img1)
+            #print("fake_image1:{}".format(fake_img1.size()))
             fake_imgs.append(fake_img1)
         if cfg.TREE.BRANCH_NUM > 1:
             # print("branch 2")
@@ -317,9 +320,12 @@ def downBlock(in_planes, out_planes):
 
 # Downsale the spatial size by a factor of 16
 def encode_image_by_16times(ndf):
+    channel = 3
+    if cfg.DATASET_NAME=="mnist":
+        channel = 1
     encode_img = nn.Sequential(
         # --> state size. ndf x in_size/2 x in_size/2
-        nn.Conv2d(3, ndf, 4, 2, 1, bias=False),
+        nn.Conv2d(channel, ndf, 4, 2, 1, bias=False),
         nn.LeakyReLU(0.2, inplace=True),
         # --> state size 2ndf x x in_size/4 x in_size/4
         nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
@@ -360,15 +366,15 @@ class D_NET64(nn.Module):
         # self.uncond_logits = nn.Sequential(
         #     nn.Conv2d(ndf * 8, 1, kernel_size=4, stride=4),
         #     nn.Sigmoid())
-
+        inp = ndf * ndf
         self.uncond_logits = nn.Sequential(
-            nn.Linear(ndf * ndf, cfg.GAN.CLASS_NUM),
+            nn.Linear(inp, cfg.GAN.CLASS_NUM),
         )
 
         self.softmax = nn.Softmax()
 
         self.hash = nn.Sequential(
-            nn.Linear(ndf * ndf, cfg.GAN.HASH_DIM),
+            nn.Linear(inp, cfg.GAN.HASH_DIM),
             nn.Sigmoid())
 
     def forward(self, x_var, c_code=None):
@@ -394,9 +400,7 @@ class D_NET64(nn.Module):
         # else:
         #     return [output.view(-1)]
 
-        # print("64:x_code:{0}".format(x_code.size()))
-        x_code = x_code.view(-1, self.df_dim * self.df_dim)
-        #print("64:x_code_1:{0}".format(x_code.size()))
+        x_code = x_code.view(cfg.TRAIN.BATCH_SIZE, -1)
 
         out_uncond = self.uncond_logits(x_code)
         #print("out_uncond:{0}".format(out_uncond.size()))

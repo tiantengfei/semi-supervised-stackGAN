@@ -3,6 +3,7 @@ from __future__ import print_function
 import os
 import sys
 import time
+import cPickle as pickle
 from copy import deepcopy
 from random import randint
 from numbers import Number
@@ -16,10 +17,11 @@ import torchvision.utils as vutils
 import torch.nn.functional as F
 from PIL import Image
 from six.moves import range
-from tensorboard import FileWriter
-from tensorboard import summary
+#from tensorboard import FileWriter
+#from tensorboard import summary
 from torch.autograd import Variable
-
+import tensorflow as tf
+from tensorflow import summary
 from miscc.config import cfg
 from miscc.utils import mkdir_p
 from model import G_NET, D_NET64, D_NET128, D_NET256, D_NET512, D_NET1024
@@ -242,7 +244,7 @@ class condGANTrainer(object):
             mkdir_p(self.model_dir)
             mkdir_p(self.image_dir)
             mkdir_p(self.log_dir)
-            self.summary_writer = FileWriter(self.log_dir)
+            self.summary_writer = tf.summary.FileWriter(self.log_dir)
 
         s_gpus = cfg.GPU_ID.split(',')
         self.gpus = [int(ix) for ix in s_gpus]
@@ -272,7 +274,6 @@ class condGANTrainer(object):
             labels = Variable(labels)
             #error_label_vectors = Variable(error_label_vectors)
         for i in range(self.num_Ds):
-            print("images_{}:{}".format(i, imgs[i].size()))
             if cfg.CUDA:
                 real_vimgs.append(Variable(imgs[i]).cuda())
             else:
@@ -317,7 +318,6 @@ class condGANTrainer(object):
     def train_Dnet(self, idx, count):
         flag = count % 25
         batch_size = cfg.TRAIN.BATCH_SIZE
-        print("batch_size:%d"%batch_size)
         criterion = self.criterion
 
         netD, optD = self.netsD[idx], self.optimizersD[idx]
@@ -332,7 +332,6 @@ class condGANTrainer(object):
         if cfg.CUDA:
            lab_labels = lab_labels.cuda()
         error_labels = self.error_labels[:batch_size]
-        print("unlabel_imgs:{}".format(unlabel_imgs.size()))
         unlabel_logits, unlabel_softmax_out, unlabel_hash_logits, _ = netD(unlabel_imgs)
         label_logits, label_softmax_out, label_hash_logits, _ = netD(label_imgs)
         fake_logits, fake_softmax_out, fake_hash_logits, _ = netD(fake_imgs.detach())
@@ -358,7 +357,6 @@ class condGANTrainer(object):
         fake2_loss = 0.5 * torch.mean(F.softplus(fake2_logsumexp))
         adversary_loss = true_loss +  fake_loss + fake2_loss + true_lab_loss 
         # loss for hash
-        print("label_hash:{},fake_hash{}".format(label_hash_logits.size(), fake_logits.size()))
         positive = torch.sum((label_hash_logits - fake_hash_logits) ** 2, 1)
         negtive = torch.sum((label_hash_logits - fake2_hash_logits) ** 2, 1)
         hash_loss = 1 + positive - negtive
@@ -369,10 +367,10 @@ class condGANTrainer(object):
         hash_loss = torch.mean(hash_loss * hash_loss_temp)
 
         d_total_loss = supvised_loss + adversary_loss + hash_loss
-        print("d_supervied_loss_{0}:{1}".format(idx, supvised_loss.data[0]))
-        print("d_adversary_loss_{0}:{1}".format(idx, adversary_loss.data[0]))
-        print("d_hash_loss_{0}:{1}".format(idx, hash_loss.data[0]))
-        print("d_total_loss_{0}:{1}".format(idx, d_total_loss.data[0]))
+        #print("d_supervied_loss_{0}:{1}".format(idx, supvised_loss.data[0]))
+        #print("d_adversary_loss_{0}:{1}".format(idx, adversary_loss.data[0]))
+        #print("d_hash_loss_{0}:{1}".format(idx, hash_loss.data[0]))
+        #print("d_total_loss_{0}:{1}".format(idx, d_total_loss.data[0]))
 
 
         # adversary stream
@@ -421,7 +419,6 @@ class condGANTrainer(object):
         errG_total = 0
         flag = count % 25
         batch_size = cfg.TRAIN.BATCH_SIZE
-        print("batch_size:%d"%batch_size)
         criterion = self.criterion
 
         for i in range(self.num_Ds):
@@ -473,10 +470,10 @@ class condGANTrainer(object):
             hash_loss = torch.mean(hash_loss * hash_loss_temp)
 
             g_total_loss = supvised_loss + adversary_loss + hash_loss
-            print("g_supervied_loss_{0}:{1}".format(i, supvised_loss.data[0]))
-            print("g_adversary_loss_{0}:{1}".format(i, adversary_loss.data[0]))
-            print("g_hash_loss_{0}:{1}".format(i, hash_loss.data[0]))
-            print("g_total_loss_{0}:{1}".format(i, g_total_loss.data[0]))
+            #print("g_supervied_loss_{0}:{1}".format(i, supvised_loss.data[0]))
+            #print("g_adversary_loss_{0}:{1}".format(i, adversary_loss.data[0]))
+            #print("g_hash_loss_{0}:{1}".format(i, hash_loss.data[0]))
+            #print("g_total_loss_{0}:{1}".format(i, g_total_loss.data[0]))
 
 
             # if len(outputs) > 1 and cfg.TRAIN.COEFF.UNCOND_LOSS > 0:
@@ -498,6 +495,55 @@ class condGANTrainer(object):
                 self.summary_writer.add_summary(summary_D3, count)
 
         
+        if cfg.TRAIN.COEFF.COLOR_LOSS > 0:
+            if self.num_Ds > 1:
+                mu1, covariance1 = compute_mean_covariance(self.fake_imgs[-1])
+                mu2, covariance2 = \
+                    compute_mean_covariance(self.fake_imgs[-2].detach())
+                like_mu2 = cfg.TRAIN.COEFF.COLOR_LOSS * nn.MSELoss()(mu1, mu2)
+                like_cov2 = cfg.TRAIN.COEFF.COLOR_LOSS * 5 * \
+                            nn.MSELoss()(covariance1, covariance2)
+
+                fake2_mu1, fake2_covariance1 = compute_mean_covariance(self.fake_imgs_2[-1])
+                fake2_mu2, fake2_covariance2 = \
+                    compute_mean_covariance(self.fake_imgs_2[-2].detach())
+                fake2_like_mu2 = cfg.TRAIN.COEFF.COLOR_LOSS * nn.MSELoss()(mu1, mu2)
+                fake2_like_cov2 = cfg.TRAIN.COEFF.COLOR_LOSS * 5 * \
+                            nn.MSELoss()(fake2_covariance1, fake2_covariance2)
+                errG_total = errG_total + like_mu2 + like_cov2+ fake2_like_mu2 + fake2_like_cov2
+                if flag == 0:
+                    sum_mu = summary.scalar('G_like_mu2', like_mu2.data[0])
+                    self.summary_writer.add_summary(sum_mu, count)
+                    sum_cov = summary.scalar('G_like_cov2', like_cov2.data[0])
+                    self.summary_writer.add_summary(sum_cov, count)
+                    sum_mu = summary.scalar('G_fake2_like_mu2', fake2_like_mu2.data[0])
+                    self.summary_writer.add_summary(sum_mu, count)
+                    sum_cov = summary.scalar('G_fake2_like_cov2', fake2_like_cov2.data[0])
+                    self.summary_writer.add_summary(sum_cov, count)
+            if self.num_Ds > 2:
+                mu1, covariance1 = compute_mean_covariance(self.fake_imgs[-2])
+                mu2, covariance2 = \
+                    compute_mean_covariance(self.fake_imgs[-3].detach())
+                like_mu1 = cfg.TRAIN.COEFF.COLOR_LOSS * nn.MSELoss()(mu1, mu2)
+                like_cov1 = cfg.TRAIN.COEFF.COLOR_LOSS * 5 * \
+                            nn.MSELoss()(covariance1, covariance2)
+
+                fake2_mu1, fake2_covariance1 = compute_mean_covariance(self.fake_imgs_2[-2])
+                fake2_mu2, fake2_covariance2 = \
+                    compute_mean_covariance(self.fake_imgs_2[-3].detach())
+                fake2_like_mu1 = cfg.TRAIN.COEFF.COLOR_LOSS * nn.MSELoss()(fake2_mu1, fake2_mu2)
+                fake2_like_cov1 = cfg.TRAIN.COEFF.COLOR_LOSS * 5 * \
+                            nn.MSELoss()(fake2_covariance1, fake2_covariance2)
+                errG_total = errG_total + like_mu1 + like_cov1 + fake2_like_mu1 + fake2_like_cov1
+                if flag == 0:
+                    sum_mu = summary.scalar('G_like_mu1', like_mu1.data[0])
+                    self.summary_writer.add_summary(sum_mu, count)
+                    sum_cov = summary.scalar('G_like_cov1', like_cov1.data[0])
+                    self.summary_writer.add_summary(sum_cov, count)
+                    sum_mu = summary.scalar('G_like_mu1', fake2_like_mu1.data[0])
+                    self.summary_writer.add_summary(sum_mu, count)
+                    sum_cov = summary.scalar('G_like_cov1', fake2_like_cov1.data[0])
+                    self.summary_writer.add_summary(sum_cov, count)
         # kl_loss = KL_loss(mu, logvar) * cfg.TRAIN.COEFF.KL
         # errG_total = errG_total + kl_loss
         errG_total.backward(retain_graph=True)
@@ -807,6 +853,7 @@ class condGANTrainer(object):
         hash_dict = {}
         #imgs_total = None
         label_total = None
+        feats_total = None
         output_dir = os.path.join("eval", dataset_name)
         print("len:%d"%len(self.unlabel_loader))
         #save_steps = len(self.unlabel_loader) / 10
@@ -821,7 +868,7 @@ class condGANTrainer(object):
             for i in range(cfg.TREE.BRANCH_NUM):
                 net = netsD[i]
                 real_img = real_imgs[i]
-                real_logits, softmax_out, hash_logits, _ = net(real_img)
+                real_logits, softmax_out, hash_logits, feats = net(real_img)
                 #hash_logits = hash_logits > 0.5
                 if i in hash_dict:
                     hash_dict[i] = torch.cat((hash_dict[i], hash_logits), 0)
@@ -831,21 +878,26 @@ class condGANTrainer(object):
             if label_total is None:
                 label_total = labels
                 imgs_total = real_imgs[0]
+                feats_total = feats
             else:
                 label_total = torch.cat((label_total, labels), 0)
                 imgs_total = torch.cat((imgs_total, real_imgs[0]), 0)
+                feats_total = torch.cat((feats_total, feats), 0)
             
             if (step+1) % save_steps == 0:
                 cnt = (step + 1) / save_steps
                 output_img = os.path.join(output_dir, "%s_images_%d.npy" % (dataset_name, cnt))
                 output_label = os.path.join(output_dir, "%s_label_%d.npy" % (dataset_name, cnt))
+                output_feats = os.path.join(output_dir, "%s_feats_%d.npy" % (dataset_name, cnt))
 
                 if cfg.CUDA:
                     np.save(output_img, imgs_total.cpu().data.numpy())
                     np.save(output_label, label_total.cpu().data.numpy())
+                    np.save(output_feats, feats_total.cpu().data.numpy())
                 else:
                     np.save(output_img, imgs_total.data.numpy())
                     np.save(output_label, label_total.data.numpy())
+                    np.save(output_feats, label_feats.data.numpy())
 
                 for i in range(cfg.TREE.BRANCH_NUM):
                     output_hash = os.path.join(output_dir, "branch_%d_hash_%s_%d.npy" % (i, dataset_name, cnt))
@@ -856,8 +908,8 @@ class condGANTrainer(object):
 
                 imgs_total = None
                 label_total = None
+                feats_total = None
                 hash_dict= {}
-            print("step %d done!" % step)
             print("step %d done!" % step)
 
 
@@ -885,7 +937,7 @@ class condGANTrainer(object):
 
             for i in range(cfg.TREE.BRANCH_NUM):
                 print('Load %s_%d.pth' % (cfg.TRAIN.NET_D, i))
-                state_dict = torch.load('%snetD%d_60000.pth' % (cfg.TRAIN.NET_D, i),
+                state_dict = torch.load('%snetD%d_140000.pth' % (cfg.TRAIN.NET_D, i),
                                         map_location=lambda storage, loc: storage)
                 netsD[i].load_state_dict(state_dict)
 
@@ -911,30 +963,51 @@ class condGANTrainer(object):
         Y = cdist(test_features, db_features, metric)
         ind = np.argsort(Y, axis=1)
         prec_total = 0.0
-        recall_total = None
+        recall_total = None 
         precision_total = None
+        max_ap = 2.0
+        cnt = 0
+        max_index = 0
+        cnt = 0
+        o_p = None
+        o_r = None
         for k in range(np.shape(test_features)[0]):
             class_values = db_label[ind[k,:]]
             y_true = (test_label[k] == class_values)
             y_scores = np.arange(y_true.shape[0],0,-1)
             ap = average_precision_score(y_true, y_scores)
+            precision, recall, r = precision_recall_curve(y_true, y_scores)
+            #print(r)
+            if max_ap >  ap:
+               max_ap = ap
+               o_p = precision
+               o_r = recall 
+               max_index = cnt 
+            cnt += 1
             prec_total += ap
-            if recall_total is None:
-                precision_total, recall_total, r = precision_recall_curve(y_true, y_scores)
-                print("precision_shape:{}".format(precision_total.shape))
-                print("recall_shape:{}".format(recall_total.shape))
+            #if len(precision_total) < 50:
+            if precision_total is None:
+                precision_total = precision[len(precision) - 5000:]
+                recall_total = recall[len(recall)- 5000:]
             else:
-                precision, recall, r = precision_recall_curve(y_true, y_scores)
+        
+                precision_total = [sum(x) for x in zip(precision[len(precision)-5000:], precision_total)]
+                recall_total = [sum(x) for x in zip(recall[len(recall)-5000:], recall_total)]
+        
+            #print("precision:{}".format(precision[5870:]))
+            #print("recall:{}".format(recall[5870:]))
                 #if k % 100 == 0:
                     #print(r)
                 #print("precision_shape:{}".format(precision.shape))
                 #print("recall_shape:{}".format(recall.shape))
                 #precision_total = precision_total + precision
                 #recall_total = recall_total + recall
-        print(precision[5800:])
-        print(recall[:20])  
         test_num = test_features.shape[0]
         MAP = prec_total / test_num
+        
+        precision_total = [i / test_num for i in precision_total]
+        recall_total = [i / test_num for i in recall_total]
+         
         #recall_total = [i/test_num for i in recall_total]
         #precision_total = [i / test_num for i in precision_total]
 
@@ -946,10 +1019,63 @@ class condGANTrainer(object):
             f.write("MAP:%f\n" % MAP)
             #f.write("recall\n:{0}".format(recall_total))
             #f.write("precision\n:{0}".format(precision_total))
+        with open("precision_recall.pkl", "wb") as f:
+           # print("max_ap:{}".format(max_ap))
+            d = {"precision": precision_total, "recall":recall_total}
+            pickle.dump(d, f, pickle.HIGHEST_PROTOCOL)
+ 
+             
+        self.compute_MAP_me(test_label, db_label, ind)
 
         #np.save("recall.npy", recall_total)
         #np.save("precision.npy", precision_total)
+    def compute_MAP_me(self,test_label, db_label, ind):
+        print("--------------------me----------")
+        precision_top = [0.0 for i in range(10)]
+        MAP = 0.0
+        precision = [0.0 for i in range(10)]
+        recall = [0.0 for i in range(10)]
+        all_db_num = db_label.shape[0]
+        for k in range(np.shape(test_label)[0]):
+            class_values = db_label[ind[k,:]]
+            y_true = (test_label[k] == class_values)
+            ap = 0.0
+            semi = 0
+            cnt = 0
+            divide = db_label.shape[0] // 100
+            dd = divide
+            index = 0
+            ss = 0.1
+            for i in y_true:
+                if i:
+                    semi += 1
+                    cnt += 1
+                          
+                    ap += float(semi) / cnt
+                    r =  float(semi) / (db_label.shape[0] / 10)
+                    #if r > ss:
+                     #    precision[index] += float(semi)/cnt
+                      #   recall[index] += r
+                       #  index += 1
+                       #  ss = (index + 1) * 0.1
 
+                else:
+                    cnt +=1
+                if cnt % 100 == 0 and cnt < 1100:
+                    precision_top[cnt / 100 - 1] += float(semi) / cnt
+           
+            MAP += ap / (db_label.shape[0]/10)
+        precision_top = [p / test_label.shape[0] for p in precision_top]
+        MAP = MAP / (test_label.shape[0])
+        precision = [p / test_label.shape[0] for p in precision]
+        recall =  [p / test_label.shape[0] for p in recall]
+        
+          
+        print("MAP:%f"% MAP)
+        print("precision_top:{}".format(precision_top))
+        # print("precision:{}".format(precision))
+        #print("recall:{}".format(recall))
+        print("--------------me end---------------")
     def compute_MAP(self, root, branch, query_labels, db_labels):
 
         query_npys = os.listdir(os.path.join(root, "test"))
@@ -1103,7 +1229,7 @@ class condGANTrainer(object):
             print("get query image hash")
        
         if len(os.listdir(os.path.join(root, "db"))) == 0:
-            save_steps = len(db_dataloader) / 10
+            save_steps = len(db_dataloader) / 59
             self.get_hash(db_dataloader, netsD, "db", save_steps)
             print("get db image hash!")
 
@@ -1128,7 +1254,11 @@ class condGANTrainer(object):
             else:
                 db_hashs += db_hash
                 query_hashs += query_hash
-
+                if i == 2:
+                    with open(os.path.join(root, "tsne", "query_feature.npy"), 'w') as f:
+                        np.save(f, query_hash)
+                    with open(os.path.join(root, "tsne", "train_feature.npy"), 'w') as f:
+                        np.save(f, db_hash)
         db_hashs /= cfg.TREE.BRANCH_NUM
         query_hashs /= cfg.TREE.BRANCH_NUM
 
