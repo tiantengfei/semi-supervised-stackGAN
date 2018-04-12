@@ -48,7 +48,7 @@ class GLU(nn.Module):
         super(GLU, self).__init__()
 
     def forward(self, x):
-        print("glu:{}".format(x.size()))
+        #print("glu:{}".format(x.size()))
         nc = x.size(1)
         assert nc % 2 == 0, 'channels dont divide 2!'
         nc = int(nc / 2)

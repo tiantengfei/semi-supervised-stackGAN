@@ -21,7 +21,8 @@ from six.moves import range
 #from tensorboard import summary
 from torch.autograd import Variable
 import tensorflow as tf
-from tensorflow import summary
+#from tensorflow import summary
+from tensorboardX import SummaryWriter
 from miscc.config import cfg
 from miscc.utils import mkdir_p
 from model import G_NET, D_NET64, D_NET128, D_NET256, D_NET512, D_NET1024
@@ -211,8 +212,8 @@ def save_img_results(imgs_tcpu, fake_imgs, num_imgs,
     real_img_set = np.transpose(real_img_set, (1, 2, 0))
     real_img_set = real_img_set * 255
     real_img_set = real_img_set.astype(np.uint8)
-    sup_real_img = summary.image('real_img', real_img_set)
-    summary_writer.add_summary(sup_real_img, count)
+    #sup_real_img = summary.image('real_img', real_img_set)
+    summary_writer.add_image('real_img', real_img_set, count)
 
     for i in range(num_imgs):
         fake_img = fake_imgs[i][0:num]
@@ -228,9 +229,9 @@ def save_img_results(imgs_tcpu, fake_imgs, num_imgs,
         fake_img_set = (fake_img_set + 1) * 255 / 2
         fake_img_set = fake_img_set.astype(np.uint8)
 
-        sup_fake_img = summary.image('fake_img%d' % i, fake_img_set)
-        summary_writer.add_summary(sup_fake_img, count)
-        summary_writer.flush()
+        #sup_fake_img = summary.image('fake_img%d' % i, fake_img_set)
+        summary_writer.add_image('fake_img%d' % i, fake_img_set, count)
+        #summary_writer.flush()
 
 
 # ################# Text to image task############################ #
@@ -244,7 +245,7 @@ class condGANTrainer(object):
             mkdir_p(self.model_dir)
             mkdir_p(self.image_dir)
             mkdir_p(self.log_dir)
-            self.summary_writer = tf.summary.FileWriter(self.log_dir)
+            self.summary_writer = SummaryWriter(self.log_dir)
 
         s_gpus = cfg.GPU_ID.split(',')
         self.gpus = [int(ix) for ix in s_gpus]
@@ -325,6 +326,7 @@ class condGANTrainer(object):
         unlabel_imgs = self.unlabel_real_imgs[idx]
         fake_imgs = self.fake_imgs[idx]
         fake_imgs_2 = self.fake_imgs_2[idx]
+        fake_imgs_3 = self.fake_imgs_3[idx]
 
         netD.zero_grad()
 
@@ -336,26 +338,29 @@ class condGANTrainer(object):
         label_logits, label_softmax_out, label_hash_logits, _ = netD(label_imgs)
         fake_logits, fake_softmax_out, fake_hash_logits, _ = netD(fake_imgs.detach())
         fake2_logits, fake2_softmax_out, fake2_hash_logits, _ = netD(fake_imgs_2.detach())
+        fake3_logits, fake3_softmax_out, fake3_hash_logits, _ = netD(fake_imgs_3.detach())
 
 
         # standard classfication loss
         lab_loss = criterion(label_logits, lab_labels)
         fake_lab_loss = criterion(fake_logits, lab_labels)
-        fake2_lab_loss = criterion(fake_logits, error_labels)
+        fake2_lab_loss = criterion(fake2_logits, error_labels)
 
-        supvised_loss = (lab_loss + fake_lab_loss + fake2_lab_loss) / 3
+        supvised_loss = (lab_loss + fake2_lab_loss + fake_lab_loss)/3
 
         # GAN true-fake loss   adversary stream
         unl_logsumexp = self.log_sum_exp(unlabel_logits,1)
         lab_logsumexp = self.log_sum_exp(label_logits,1)
         fake_logsumexp = self.log_sum_exp(fake_logits,1)
         fake2_logsumexp = self.log_sum_exp(fake2_logits,1)
+        fake3_logsumexp = self.log_sum_exp(fake3_logits,1)
 
         true_loss = -0.5 * torch.mean(unl_logsumexp) + 0.5 * torch.mean(F.softplus(unl_logsumexp))
         true_lab_loss = -0.5 * torch.mean(lab_logsumexp) + 0.5 * torch.mean(F.softplus(lab_logsumexp))
         fake_loss = 0.5 * torch.mean(F.softplus(fake_logsumexp))
         fake2_loss = 0.5 * torch.mean(F.softplus(fake2_logsumexp))
-        adversary_loss = true_loss +  fake_loss + fake2_loss + true_lab_loss 
+        fake3_loss = 0.5 * torch.mean(F.softplus(fake3_logsumexp))
+        adversary_loss = (true_loss + fake2_loss + fake_loss + true_lab_loss + fake3_loss)/5
         # loss for hash
         positive = torch.sum((label_hash_logits - fake_hash_logits) ** 2, 1)
         negtive = torch.sum((label_hash_logits - fake2_hash_logits) ** 2, 1)
@@ -403,15 +408,17 @@ class condGANTrainer(object):
 
         # log
         if flag == 0:
-            summary_D = summary.scalar('D_supervised%d' % idx, supvised_loss.data[0])
-            summary_D1 = summary.scalar('D_hash_loss_%d' % idx, hash_loss.data[0])
-            summary_D2 = summary.scalar('D_total_loss_%d' % idx, d_total_loss.data[0])
-            summary_D3 = summary.scalar('D_adversary_loss_%d' % idx, adversary_loss.data[0])
+            #summary_D = summary.scalar('D_supervised%d' % idx, supvised_loss.data[0])
+            #summary_D = summary.scalar('D_supervised%d' % idx, 0.05).eval()
+            #summary_D1 = summary.scalar('D_hash_loss_%d' % idx, hash_loss.data[0])
+            #summary_D2 = summary.scalar('D_total_loss_%d' % idx, d_total_loss.data[0])
+            #summary_D3 = summary.scalar('D_adversary_loss_%d' % idx, adversary_loss.data[0])
 
-            self.summary_writer.add_summary(summary_D, count)
-            self.summary_writer.add_summary(summary_D1, count)
-            self.summary_writer.add_summary(summary_D2, count)
-            self.summary_writer.add_summary(summary_D3, count)
+            print("d_total_loss:{}".format(adversary_loss.data[0]))
+            self.summary_writer.add_scalar('D_supervised%d' % idx, supvised_loss.data[0], count)
+            self.summary_writer.add_scalar('D_total_loss_%d' % idx, d_total_loss.data[0], count)
+            self.summary_writer.add_scalar('D_hash_loss_%d' % idx, hash_loss.data[0], count)
+            self.summary_writer.add_scalar('D_adversary_loss_%d' % idx, adversary_loss.data[0], count)
         return d_total_loss
 
     def train_Gnet(self, count):
@@ -428,6 +435,7 @@ class condGANTrainer(object):
             unlabel_imgs = self.unlabel_real_imgs[i]
             fake_imgs = self.fake_imgs[i]
             fake_imgs_2 = self.fake_imgs_2[i]
+            fake_imgs_3 = self.fake_imgs_3[i]
 
 
             lab_labels = self.labels[:batch_size].type(torch.LongTensor)
@@ -438,27 +446,33 @@ class condGANTrainer(object):
             unlabel_logits, unlabel_softmax_out, unlabel_hash_logits, _ = netD(unlabel_imgs)
             fake_logits, fake_softmax_out, fake_hash_logits, _ = netD(fake_imgs)
             fake2_logits, fake2_softmax_out, fake2_hash_logits, _ = netD(fake_imgs_2)
+            fake3_logits, fake3_softmax_out, fake3_hash_logits, _ = netD(fake_imgs_3)
 
 
             # standard classfication loss
             lab_loss = criterion(label_logits, lab_labels)
             fake_lab_loss = criterion(fake_logits, lab_labels)
-            fake2_lab_loss = criterion(fake_logits, error_labels)
+            fake2_lab_loss = criterion(fake2_logits, error_labels)
 
-            supvised_loss = (lab_loss + fake_lab_loss + fake2_lab_loss) / 3
+            supvised_loss = lab_loss
 
             # GAN true-fake loss   adversary stream
             unl_logsumexp = self.log_sum_exp(unlabel_logits,1)
             lab_logsumexp = self.log_sum_exp(label_logits,1)
             fake_logsumexp = self.log_sum_exp(fake_logits,1)
             fake2_logsumexp = self.log_sum_exp(fake2_logits,1)
+            fake3_logsumexp = self.log_sum_exp(fake3_logits,1)
 
             fake_loss = -0.5 * torch.mean(fake_logsumexp) + 0.5 * torch.mean(F.softplus(fake_logsumexp))
             fake2_loss = -0.5 * torch.mean(fake2_logsumexp) + 0.5 * torch.mean(F.softplus(fake2_logsumexp))
+            fake3_loss = -0.5 * torch.mean(fake3_logsumexp) + 0.5 * torch.mean(F.softplus(fake3_logsumexp))
+
+            adversary_loss = (fake2_loss + fake_loss+fake3_loss)/3
+
             #true_lab_loss = -0.5 * torch.mean(lab_logsumexp) + 0.5 * torch.mean(F.softplus(lab_logsumexp))
             #fake_loss =   1 - 0.5 * torch.mean(F.softplus(fake_logsumexp))
             #fake2_loss =  1 - 0.5 * torch.mean(F.softplus(fake2_logsumexp))
-            adversary_loss = fake_loss + fake2_loss  
+            # adversary_loss = (fake3_loss + fake_loss + fake2_loss)/3
             # loss for hash
             positive = torch.sum((label_hash_logits - fake_hash_logits) ** 2, 1)
             negtive = torch.sum((label_hash_logits - fake2_hash_logits) ** 2, 1)
@@ -484,15 +498,15 @@ class condGANTrainer(object):
             print("g_loss_%d: %f" % (i, errG_total.data[0]))
 
             if flag == 0:
-                summary_D = summary.scalar('G_supervised%d' % i, supvised_loss.data[0])
-                summary_D1 = summary.scalar('G_hash_loss_%d' % i, hash_loss.data[0])
-                summary_D2 = summary.scalar('G_total_loss_%d' % i, g_total_loss.data[0])
-                summary_D3 = summary.scalar('G_adversary_loss_%d' % i, adversary_loss.data[0])
+                #summary_D = summary.scalar('G_supervised%d' % i, supvised_loss.data[0])
+                #summary_D1 = summary.scalar('G_hash_loss_%d' % i, hash_loss.data[0])
+                #summary_D2 = summary.scalar('G_total_loss_%d' % i, g_total_loss.data[0])
+                #summary_D3 = summary.scalar('G_adversary_loss_%d' % i, adversary_loss.data[0])
 
-                self.summary_writer.add_summary(summary_D, count)
-                self.summary_writer.add_summary(summary_D1, count)
-                self.summary_writer.add_summary(summary_D2, count)
-                self.summary_writer.add_summary(summary_D3, count)
+                self.summary_writer.add_scalar('G_supervised%d' % i, supvised_loss.data[0], count)
+                self.summary_writer.add_scalar('G_hash_loss_%d' % i, hash_loss.data[0], count)
+                self.summary_writer.add_scalar('G_total_loss_%d' % i, g_total_loss.data[0], count)
+                self.summary_writer.add_scalar('G_adversary_loss_%d' % i, adversary_loss.data[0], count)
 
         
         if cfg.TRAIN.COEFF.COLOR_LOSS > 0:
@@ -503,23 +517,31 @@ class condGANTrainer(object):
                 like_mu2 = cfg.TRAIN.COEFF.COLOR_LOSS * nn.MSELoss()(mu1, mu2)
                 like_cov2 = cfg.TRAIN.COEFF.COLOR_LOSS * 5 * \
                             nn.MSELoss()(covariance1, covariance2)
-
                 fake2_mu1, fake2_covariance1 = compute_mean_covariance(self.fake_imgs_2[-1])
                 fake2_mu2, fake2_covariance2 = \
                     compute_mean_covariance(self.fake_imgs_2[-2].detach())
-                fake2_like_mu2 = cfg.TRAIN.COEFF.COLOR_LOSS * nn.MSELoss()(mu1, mu2)
+                fake2_like_mu2 = cfg.TRAIN.COEFF.COLOR_LOSS * nn.MSELoss()(fake2_mu1, fake2_mu2)
                 fake2_like_cov2 = cfg.TRAIN.COEFF.COLOR_LOSS * 5 * \
                             nn.MSELoss()(fake2_covariance1, fake2_covariance2)
-                errG_total = errG_total + like_mu2 + like_cov2+ fake2_like_mu2 + fake2_like_cov2
-                if flag == 0:
-                    sum_mu = summary.scalar('G_like_mu2', like_mu2.data[0])
-                    self.summary_writer.add_summary(sum_mu, count)
+
+                fake3_mu1, fake3_covariance1 = compute_mean_covariance(self.fake_imgs_3[-1])
+                fake3_mu2, fake3_covariance2 = \
+                    compute_mean_covariance(self.fake_imgs_3[-2].detach())
+                fake3_like_mu2 = cfg.TRAIN.COEFF.COLOR_LOSS * nn.MSELoss()(fake3_mu1, fake3_mu2)
+                fake3_like_cov2 = cfg.TRAIN.COEFF.COLOR_LOSS * 5 * \
+                            nn.MSELoss()(fake3_covariance1, fake3_covariance2)
+                errG_total = errG_total + fake3_like_mu2 + fake3_like_cov2  +fake2_like_mu2 + fake2_like_cov2 + like_mu2 + like_cov2
+                """ 
+               if flag == 0:
+                    #sum_mu = summary.scalar('G_like_mu2', like_mu2.data[0])
+                    self.summary_writer.add_scalar(, count)
                     sum_cov = summary.scalar('G_like_cov2', like_cov2.data[0])
                     self.summary_writer.add_summary(sum_cov, count)
                     sum_mu = summary.scalar('G_fake2_like_mu2', fake2_like_mu2.data[0])
                     self.summary_writer.add_summary(sum_mu, count)
                     sum_cov = summary.scalar('G_fake2_like_cov2', fake2_like_cov2.data[0])
                     self.summary_writer.add_summary(sum_cov, count)
+                """
             if self.num_Ds > 2:
                 mu1, covariance1 = compute_mean_covariance(self.fake_imgs[-2])
                 mu2, covariance2 = \
@@ -531,19 +553,31 @@ class condGANTrainer(object):
                 fake2_mu1, fake2_covariance1 = compute_mean_covariance(self.fake_imgs_2[-2])
                 fake2_mu2, fake2_covariance2 = \
                     compute_mean_covariance(self.fake_imgs_2[-3].detach())
-                fake2_like_mu1 = cfg.TRAIN.COEFF.COLOR_LOSS * nn.MSELoss()(fake2_mu1, fake2_mu2)
-                fake2_like_cov1 = cfg.TRAIN.COEFF.COLOR_LOSS * 5 * \
+                fake2_like_mu2 = cfg.TRAIN.COEFF.COLOR_LOSS * nn.MSELoss()(fake2_mu1, fake2_mu2)
+                fake2_like_cov2 = cfg.TRAIN.COEFF.COLOR_LOSS * 5 * \
                             nn.MSELoss()(fake2_covariance1, fake2_covariance2)
-                errG_total = errG_total + like_mu1 + like_cov1 + fake2_like_mu1 + fake2_like_cov1
+
+                fake3_mu1, fake3_covariance1 = compute_mean_covariance(self.fake_imgs_3[-2])
+                fake3_mu2, fake3_covariance2 = \
+                    compute_mean_covariance(self.fake_imgs_3[-3].detach())
+                fake3_like_mu1 = cfg.TRAIN.COEFF.COLOR_LOSS * nn.MSELoss()(fake3_mu1, fake3_mu2)
+                fake3_like_cov1 = cfg.TRAIN.COEFF.COLOR_LOSS * 5 * \
+                            nn.MSELoss()(fake3_covariance1, fake3_covariance2)
+                
+                errG_total = errG_total + fake3_like_mu2 + fake3_like_cov2  +fake2_like_mu2 + fake2_like_cov2 + like_mu2 + like_cov2
+
+                """
                 if flag == 0:
                     sum_mu = summary.scalar('G_like_mu1', like_mu1.data[0])
                     self.summary_writer.add_summary(sum_mu, count)
                     sum_cov = summary.scalar('G_like_cov1', like_cov1.data[0])
+
                     self.summary_writer.add_summary(sum_cov, count)
                     sum_mu = summary.scalar('G_like_mu1', fake2_like_mu1.data[0])
                     self.summary_writer.add_summary(sum_mu, count)
                     sum_cov = summary.scalar('G_like_cov1', fake2_like_cov1.data[0])
                     self.summary_writer.add_summary(sum_cov, count)
+               """ 
         # kl_loss = KL_loss(mu, logvar) * cfg.TRAIN.COEFF.KL
         # errG_total = errG_total + kl_loss
         errG_total.backward(retain_graph=True)
@@ -602,6 +636,7 @@ class condGANTrainer(object):
         nz = cfg.GAN.Z_DIM
         noise = Variable(torch.FloatTensor(self.batch_size, nz))
         noise_2 = Variable(torch.FloatTensor(self.batch_size, nz))
+        noise_3 = Variable(torch.FloatTensor(self.batch_size, nz))
         fixed_noise = \
             Variable(torch.FloatTensor(self.batch_size, nz))#.normal_(0, 1))
 
@@ -653,7 +688,11 @@ class condGANTrainer(object):
                     self.netG(noise, self.label_vectors)
 
                 self.fake_imgs_2 = self.netG(noise_2, self.error_label_vector)
-
+                
+                self.label_v = Variable(torch.FloatTensor(cfg.TRAIN.BATCH_SIZE,10).zero_())
+                if cfg.CUDA:
+                   self.label_v = self.label_v.cuda()
+                self.fake_imgs_3 = self.netG(noise_3, self.label_v)
                 #######################################################
                 # (2) Update D network
                 ######################################################
@@ -679,11 +718,11 @@ class condGANTrainer(object):
                 """
 
                 if count % 25 == 0:
-                    summary_D = summary.scalar('D_loss', errD_total.data[0])
-                    summary_G = summary.scalar('G_loss', errG_total.data[0])
+                    #summary_D = summary.scalar('D_loss', errD_total.data[0])
+                    #summary_G = summary.scalar('G_loss', errG_total.data[0])
                     # summary_KL = summary.scalar('KL_loss', kl_loss.data[0])
-                    self.summary_writer.add_summary(summary_D, count)
-                    self.summary_writer.add_summary(summary_G, count)
+                    self.summary_writer.add_scalar('D_loss', errD_total.data[0],count)
+                    self.summary_writer.add_scalar('G_loss', errG_total.data[0],count)
                     # self.summary_writer.add_summary(summary_KL, count)
 
                 count = count + 1
