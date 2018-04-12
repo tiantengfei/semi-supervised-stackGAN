@@ -454,7 +454,7 @@ class condGANTrainer(object):
             fake_lab_loss = criterion(fake_logits, lab_labels)
             fake2_lab_loss = criterion(fake2_logits, error_labels)
 
-            supvised_loss = lab_loss
+            supvised_loss = (lab_loss + fake_lab_loss + fake2_lab_loss) / 3
 
             # GAN true-fake loss   adversary stream
             unl_logsumexp = self.log_sum_exp(unlabel_logits,1)
